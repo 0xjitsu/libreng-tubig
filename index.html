@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Libreng Tubig — free water, toilets and shade in Metro Manila</title>
+    <meta name="description" content="A free map of drinking water, public toilets and covered shelters in Metro Manila, built from OpenStreetMap." />
+    <meta name="theme-color" content="#0b6e99" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Libreng Tubig" />
+    <meta property="og:url" content="https://libreng-tubig.vercel.app/" />
+    <meta property="og:title" content="Libreng Tubig — free water, toilets and shade" />
+    <meta property="og:description" content="A free map of drinking water, public toilets and covered shelters in Metro Manila. Built from OpenStreetMap." />
+    <meta property="og:image" content="https://libreng-tubig.vercel.app/og/preview.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:video" content="https://libreng-tubig.vercel.app/og/preview.mp4" />
+    <meta property="og:video:secure_url" content="https://libreng-tubig.vercel.app/og/preview.mp4" />
+    <meta property="og:video:type" content="video/mp4" />
+    <meta property="og:video:width" content="1200" />
+    <meta property="og:video:height" content="630" />
+
+    <meta name="twitter:card" content="player" />
+    <meta name="twitter:title" content="Libreng Tubig — free water, toilets and shade" />
+    <meta name="twitter:description" content="A free map of drinking water, public toilets and covered shelters in Metro Manila." />
+    <meta name="twitter:image" content="https://libreng-tubig.vercel.app/og/preview.png" />
+    <meta name="twitter:player" content="https://libreng-tubig.vercel.app/og/player.html" />
+    <meta name="twitter:player:width" content="1200" />
+    <meta name="twitter:player:height" content="630" />
+  </head>
+  <body>
+    <div id="app">
+      <header id="topbar">
+        <h1>💧 Libreng Tubig</h1>
+        <button id="lang" type="button" aria-label="Switch language">TL</button>
+      </header>
+      <div id="map" role="application" aria-label="Map of free water, toilets and shelters"></div>
+      <aside id="panel">
+        <section id="layers"></section>
+        <section id="filters"></section>
+        <section id="locate">
+          <button id="locate-btn" type="button"></button>
+          <div id="nearest" aria-live="polite"></div>
+        </section>
+        <section id="add"></section>
+      </aside>
+      <footer id="footer"></footer>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

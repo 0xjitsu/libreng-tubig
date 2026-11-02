@@ -1,0 +1,16 @@
+{
+  "fetched": "2026-11-02",
+  "osmBase": "2026-11-02T01:14:43Z",
+  "bbox": {
+    "south": 14.35,
+    "west": 120.9,
+    "north": 14.78,
+    "east": 121.15
+  },
+  "counts": {
+    "water": 89,
+    "toilets": 766,
+    "shelter": 496
+  },
+  "source": "OpenStreetMap via Overpass API"
+}
