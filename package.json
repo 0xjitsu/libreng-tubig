@@ -1,0 +1,10 @@
+{
+  "name": "libreng-tubig",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "lint": "echo 'placeholder: no source yet'",
+    "build": "echo 'placeholder: no source yet'",
+    "smoke": "echo 'placeholder: no source yet'"
+  }
+}
