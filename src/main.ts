@@ -1,14 +1,21 @@
-import maplibregl, { type GeoJSONSource, type MapGeoJSONFeature } from 'maplibre-gl';
+import maplibregl, { type GeoJSONSource } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import './style.css';
 import { getLang, setLang, t, type Key } from './i18n';
 import { isOpenNow } from './hours';
+import { isHidden, waterGroup } from './classify';
 
 const DONATE_URL = 'https://github.com/sponsors/0xjitsu'; // TODO: placeholder until the account is chosen; empty string hides the link
 const STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty'; // OpenFreeMap: free, no key
-const TYPES = ['water', 'toilets', 'shelter'] as const;
+// Layer draw order, bottom to top: water goes last so it is never buried.
+const TYPES = ['refill', 'toilets', 'shelter', 'water'] as const;
 type PlaceType = (typeof TYPES)[number];
-const COLORS: Record<PlaceType, string> = { water: '#0b84d8', toilets: '#7b3fb5', shelter: '#d97706' };
+const UI_ORDER: PlaceType[] = ['water', 'refill', 'toilets', 'shelter'];
+const FILES = ['water', 'toilets', 'shelter'] as const;
+// Dark enough for white text (>= 4.5:1); toilets is a neutral so it stays apart from water for colour-blind users.
+const COLORS: Record<PlaceType, string> = { water: '#0369a1', refill: '#0f766e', toilets: '#374151', shelter: '#b45309' };
+const RADII = [14, 18, 24, 30];
+const UNNAMED: Record<PlaceType, Key> = { water: 'unnamedWater', refill: 'unnamedRefill', toilets: 'unnamedToilets', shelter: 'unnamedShelter' };
 
 interface Props {
   osm: string;
@@ -23,23 +30,61 @@ interface Feat {
 }
 interface Meta {
   fetched: string;
-  osmBase?: string;
 }
+type LngLat = [number, number];
 
-const raw: Record<PlaceType, Feat[]> = { water: [], toilets: [], shelter: [] };
-const visible: Record<PlaceType, boolean> = { water: true, toilets: true, shelter: true };
+const raw: Record<PlaceType, Feat[]> = { water: [], refill: [], toilets: [], shelter: [] };
+const visible: Record<PlaceType, boolean> = { water: true, refill: false, toilets: true, shelter: true };
 const filters = { free: false, wheelchair: false, open: false };
 let meta: Meta | null = null;
-let userPos: [number, number] | null = null;
+let dataState: 'loading' | 'ready' | 'error' = 'loading';
+let userPos: LngLat | null = null;
 let userMarker: maplibregl.Marker | null = null;
-let map: maplibregl.Map;
+let map: maplibregl.Map | null = null;
+let mapReady = false;
+let listOpen = false;
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 const esc = (s: string): string =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+const isMobile = (): boolean => window.matchMedia('(max-width: 760px)').matches;
 
 // ---- icons -----------------------------------------------------------------
-function drawIcon(type: PlaceType): ImageData {
+function drawGlyph(g: CanvasRenderingContext2D, type: PlaceType, color: string): void {
+  g.fillStyle = color;
+  g.strokeStyle = color;
+  g.lineWidth = 3;
+  g.lineJoin = 'round';
+  if (type === 'water' || type === 'refill') {
+    g.beginPath();
+    g.moveTo(24, 10);
+    g.bezierCurveTo(32, 20, 34, 24, 34, 28);
+    g.arc(24, 28, 10, 0, Math.PI, false);
+    g.bezierCurveTo(14, 24, 16, 20, 24, 10);
+    if (type === 'water') g.fill();
+    else g.stroke(); // outline drop = refill / ask inside
+  } else if (type === 'toilets') {
+    g.beginPath();
+    g.arc(16, 14, 3.5, 0, Math.PI * 2);
+    g.arc(32, 14, 3.5, 0, Math.PI * 2);
+    g.fill();
+    g.fillRect(12.5, 19, 7, 14);
+    g.fillRect(28.5, 19, 7, 14);
+    g.fillRect(22.5, 14, 3, 22);
+  } else {
+    g.beginPath();
+    g.moveTo(9, 22);
+    g.lineTo(24, 10);
+    g.lineTo(39, 22);
+    g.closePath();
+    g.fill();
+    g.fillRect(14, 24, 3.5, 13);
+    g.fillRect(30.5, 24, 3.5, 13);
+    g.fillRect(14, 24, 20, 3);
+  }
+}
+
+function drawIconCanvas(type: PlaceType): HTMLCanvasElement {
   const size = 48;
   const c = document.createElement('canvas');
   c.width = c.height = size;
@@ -51,53 +96,65 @@ function drawIcon(type: PlaceType): ImageData {
   g.lineWidth = 3;
   g.strokeStyle = '#fff';
   g.stroke();
+  drawGlyph(g, type, '#fff');
+  return c;
+}
+
+/** White badge with a coloured glyph, drawn on cluster circles so clusters differ by shape, not only colour. */
+function drawBadge(type: PlaceType): ImageData {
+  const size = 40;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const g = c.getContext('2d')!;
+  g.beginPath();
+  g.arc(20, 20, 19, 0, Math.PI * 2);
   g.fillStyle = '#fff';
-  g.strokeStyle = '#fff';
-  g.lineWidth = 3;
-  g.lineJoin = 'round';
-  if (type === 'water') {
-    g.beginPath();
-    g.moveTo(24, 10);
-    g.bezierCurveTo(32, 20, 34, 24, 34, 28);
-    g.arc(24, 28, 10, 0, Math.PI, false);
-    g.bezierCurveTo(14, 24, 16, 20, 24, 10);
-    g.fill();
-  } else if (type === 'toilets') {
-    g.beginPath();
-    g.arc(16, 14, 3.500, 0, Math.PI * 2);
-    g.arc(32, 14, 3.500, 0, Math.PI * 2);
-    g.fill();
-    g.fillRect(12.500, 19, 7, 14);
-    g.fillRect(28.500, 19, 7, 14);
-    g.fillRect(22.500, 14, 3, 22);
-  } else {
-    g.beginPath();
-    g.moveTo(9, 22);
-    g.lineTo(24, 10);
-    g.lineTo(39, 22);
-    g.closePath();
-    g.fill();
-    g.fillRect(14, 24, 3.500, 13);
-    g.fillRect(30.500, 24, 3.500, 13);
-    g.fillRect(14, 24, 20, 3);
-  }
+  g.fill();
+  const s = 0.62;
+  g.translate(20 - 24 * s, 20 - 24 * s);
+  g.scale(s, s);
+  drawGlyph(g, type, COLORS[type]);
   return g.getImageData(0, 0, size, size);
 }
 
+const swatchCache: Partial<Record<PlaceType, string>> = {};
+const swatch = (ty: PlaceType): string =>
+  `<img class="swatch" alt="" width="22" height="22" src="${(swatchCache[ty] ??= drawIconCanvas(ty).toDataURL())}">`;
+
 // ---- data ------------------------------------------------------------------
 async function loadData(): Promise<void> {
-  const [metaRes, ...cols] = await Promise.all([
-    fetch('/data/meta.json'),
-    ...TYPES.map((ty) => fetch(`/data/${ty}.geojson`)),
-  ]);
-  meta = (await metaRes.json()) as Meta;
-  const parsed = await Promise.all(cols.map((r) => r.json() as Promise<{ features: Feat[] }>));
-  TYPES.forEach((ty, i) => (raw[ty] = parsed[i].features));
+  dataState = 'loading';
+  renderDataState();
+  try {
+    const [metaRes, ...cols] = await Promise.all([fetch('/data/meta.json'), ...FILES.map((ty) => fetch(`/data/${ty}.geojson`))]);
+    if (!metaRes.ok || cols.some((r) => !r.ok)) throw new Error('HTTP error');
+    meta = (await metaRes.json()) as Meta;
+    const parsed = await Promise.all(cols.map((r) => r.json() as Promise<{ features: Feat[] }>));
+    const byType: Record<PlaceType, Feat[]> = { water: [], refill: [], toilets: [], shelter: [] };
+    FILES.forEach((file, i) => {
+      for (const f of parsed[i].features) {
+        if (isHidden(f.properties)) continue; // private / no-access spots are not shown at all
+        if (file === 'water') {
+          if (waterGroup(f.properties) === 'refill') byType.refill.push({ ...f, properties: { ...f.properties, type: 'refill' } });
+          else byType.water.push(f);
+        } else byType[file].push(f);
+      }
+    });
+    for (const ty of TYPES) raw[ty] = byType[ty];
+    dataState = 'ready';
+  } catch {
+    dataState = 'error';
+  }
+  renderDataState();
+  renderUi();
+  refreshSources();
+  renderNearest();
+  renderList();
 }
 
 function passes(f: Feat): boolean {
   const p = f.properties;
-  if (filters.free && p.fee && p.fee !== 'no') return false;
+  if (filters.free && p.fee !== 'no') return false;
   if (filters.wheelchair && p.wheelchair !== 'yes') return false;
   if (filters.open && isOpenNow(p.opening_hours) === false) return false;
   return true;
@@ -105,57 +162,103 @@ function passes(f: Feat): boolean {
 const filtered = (ty: PlaceType): Feat[] => raw[ty].filter(passes);
 
 function refreshSources(): void {
+  if (!map || !mapReady) return;
   for (const ty of TYPES) {
     (map.getSource(ty) as GeoJSONSource | undefined)?.setData({ type: 'FeatureCollection', features: filtered(ty) } as never);
   }
-  if (userPos) renderNearest();
+}
+
+function renderDataState(): void {
+  const el = $('datastatus');
+  if (dataState === 'loading') el.innerHTML = `<p class="note">${t('loading')}</p>`;
+  else if (dataState === 'error') el.innerHTML = `<p class="err">${t('dataError')} <button type="button" id="retry-data" class="link">${t('retry')}</button></p>`;
+  else el.innerHTML = '';
+  document.getElementById('retry-data')?.addEventListener('click', () => void loadData());
 }
 
 // ---- popup -----------------------------------------------------------------
 const triLabel = (v: string | undefined): string =>
   v === 'yes' ? t('yes') : v === 'no' ? t('no') : v === 'limited' ? t('limited') : v ? esc(v) : t('unknown');
 
-function popupHtml(p: Props, coords: [number, number]): string {
+function feeLabel(p: Props): string {
+  const v = p.fee ?? (p.charge ? p.charge : undefined);
+  if (!v) return t('unknown');
+  if (v === 'no') return t('feeFree');
+  if (v === 'yes') return t('feePaid');
+  return esc(v);
+}
+function accessLabel(a: string): string {
+  if (a === 'customers') return t('customersOnly');
+  if (a === 'permit') return t('permitOnly');
+  if (a === 'yes' || a === 'permissive' || a === 'public') return t('accessOpen');
+  return esc(a);
+}
+const spotName = (p: Props): string => p.name || p['name:en'] || p['name:tl'] || t(UNNAMED[p.type]);
+function badges(p: Props): string {
+  const out: string[] = [];
+  if (p.access === 'customers') out.push(t('customersOnly'));
+  else if (p.access === 'permit') out.push(t('permitOnly'));
+  return out.map((b) => ` <span class="badge">${b}</span>`).join('');
+}
+
+function popupHtml(p: Props, coords: LngLat): string {
   const [lon, lat] = coords;
   const rows: [string, string][] = [];
-  const feeVal = p.fee ?? (p.charge ? p.charge : undefined);
-  rows.push([t('fee'), feeVal ? (feeVal === 'no' ? t('no') + ' (' + t('freeOnly').split(' (')[0].toLowerCase() + ')' : esc(feeVal)) : t('unknown')]);
+  rows.push([t('fee'), feeLabel(p)]);
   if (p.opening_hours) {
     const o = isOpenNow(p.opening_hours);
-    rows.push([t('hours'), esc(p.opening_hours) + ` — ${o === null ? t('unknown') : o ? t('openState') : t('no') + ' / closed'}`]);
+    rows.push([t('hours'), esc(p.opening_hours) + (o === null ? '' : ` — ${o ? t('openState') : t('closedState')}`)]);
   }
   rows.push([t('wheelchair'), triLabel(p.wheelchair)]);
-  if (p.access) rows.push([t('access'), esc(p.access)]);
+  if (p.access) rows.push([t('access'), accessLabel(p.access)]);
   if (p.type === 'toilets') {
     if (p.changing_table) rows.push([t('changing'), triLabel(p.changing_table)]);
     for (const k of ['unisex', 'male', 'female'] as const) if (p[k]) rows.push([t(k), triLabel(p[k])]);
   }
-  if (p.type === 'water' && p.bottle) rows.push([t('bottle'), triLabel(p.bottle)]);
+  const isWater = p.type === 'water' || p.type === 'refill';
+  if (isWater && p.bottle) rows.push([t('bottle'), triLabel(p.bottle)]);
   if (p.type === 'shelter') {
     if (p.covered) rows.push([t('covered'), triLabel(p.covered)]);
-    if (p.shelter_type) rows.push(['Type', esc(p.shelter_type)]);
+    if (p.shelter_type) rows.push([t('shelterType'), esc(p.shelter_type.replace(/_/g, ' '))]);
   }
-  const name = p.name || p['name:en'] || p['name:tl'] || t(p.type);
   const [kind, id] = p.osm.split('/');
   const dir = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}&travelmode=walking`;
   const edit = `https://www.openstreetmap.org/edit?${kind}=${id}`;
-  return `<div class="pop"><h3 style="color:${COLORS[p.type]}">${esc(name)}</h3>
-    <div class="kind">${t(p.type)}</div>
-    <dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
+  const caveat = isWater
+    ? `<p class="caveat"><strong>${t('potability')}</strong> ${t('osmTagged')}${p.type === 'refill' ? ' ' + t('bizNote') : ''}</p>`
+    : '';
+  return `<div class="pop"><h3>${esc(spotName(p))}</h3>
+    <div class="kind">${swatch(p.type)} ${t(p.type)}${badges(p)}</div>
+    <dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>${caveat}
     <div class="pop-links"><a href="${dir}" target="_blank" rel="noopener">${t('directions')}</a>
     <a href="https://www.openstreetmap.org/${kind}/${id}" target="_blank" rel="noopener">OSM</a>
     <a href="${edit}" target="_blank" rel="noopener">${t('edit')}</a></div></div>`;
 }
 
-function openPopup(f: { properties: Props; coords: [number, number] }): void {
-  new maplibregl.Popup({ maxWidth: '300px', offset: 14 })
-    .setLngLat(f.coords)
-    .setHTML(popupHtml(f.properties, f.coords))
-    .addTo(map);
+function openPopup(f: { properties: Props; coords: LngLat }): void {
+  if (!map || !mapReady) return;
+  new maplibregl.Popup({ maxWidth: '300px', offset: 14 }).setLngLat(f.coords).setHTML(popupHtml(f.properties, f.coords)).addTo(map);
+}
+
+function focusSpot(ty: PlaceType, id: string): void {
+  const f = raw[ty].find((x) => x.id === id);
+  if (!f || !map || !mapReady) return;
+  if (isMobile()) closeSheet();
+  map.flyTo({ center: f.geometry.coordinates, zoom: Math.max(map.getZoom(), 17) });
+  openPopup({ properties: f.properties, coords: f.geometry.coordinates });
+}
+
+function bindSpotButtons(root: HTMLElement): void {
+  root.querySelectorAll<HTMLButtonElement>('button[data-id]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const [ty, id] = b.dataset.id!.split(/:(.+)/) as [PlaceType, string];
+      focusSpot(ty, id);
+    }),
+  );
 }
 
 // ---- nearest ---------------------------------------------------------------
-function distM(a: [number, number], b: [number, number]): number {
+function distM(a: LngLat, b: LngLat): number {
   const R = 6371000;
   const rad = Math.PI / 180;
   const dLat = (b[1] - a[1]) * rad;
@@ -164,74 +267,100 @@ function distM(a: [number, number], b: [number, number]): number {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-function renderNearest(): void {
-  if (!userPos) return;
-  const out = $('nearest');
-  const items = TYPES.map((ty) => {
-    let best: Feat | null = null;
-    let bd = Infinity;
-    for (const f of filtered(ty)) {
-      const d = distM(userPos!, f.geometry.coordinates);
-      if (d < bd) {
-        bd = d;
-        best = f;
-      }
+function nearestOf(ty: PlaceType, from: LngLat): { best: Feat | null; bd: number } {
+  let best: Feat | null = null;
+  let bd = Infinity;
+  for (const f of filtered(ty)) {
+    const d = distM(from, f.geometry.coordinates);
+    if (d < bd) {
+      bd = d;
+      best = f;
     }
-    return { ty, best, bd };
-  });
+  }
+  return { best, bd };
+}
+const fmtDist = (m: number): string => (m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`);
+
+function nearestItems(from: LngLat): { ty: PlaceType; best: Feat | null; bd: number }[] {
+  const items: { ty: PlaceType; best: Feat | null; bd: number }[] = [];
+  for (const base of ['water', 'toilets', 'shelter'] as const) {
+    if (!visible[base]) continue; // respect layer toggles
+    let ty: PlaceType = base;
+    let r = nearestOf(base, from);
+    // Prefer a public tap. Fall back to a business only when there is no public tap, and label it.
+    if (base === 'water' && !r.best) {
+      ty = 'refill';
+      r = nearestOf('refill', from);
+    }
+    items.push({ ty, ...r });
+  }
+  return items;
+}
+
+function renderNearest(): void {
+  const out = $('nearest');
+  if (!userPos) return;
+  if (dataState !== 'ready') {
+    out.innerHTML = '';
+    return;
+  }
+  const items = nearestItems(userPos);
+  if (!items.length) {
+    out.innerHTML = `<h3>${t('nearest')}</h3><p class="note">${t('allOff')}</p>`;
+    return;
+  }
   out.innerHTML =
     `<h3>${t('nearest')}</h3><ul>` +
     items
       .map(({ ty, best, bd }) => {
-        if (!best) return `<li><span class="dot" style="background:${COLORS[ty]}"></span>${t(ty)}: ${t('nothing')}</li>`;
-        const dist = bd < 1000 ? `${Math.round(bd)} m` : `${(bd / 1000).toFixed(1)} km`;
+        if (!best) return `<li>${swatch(ty)}${t(ty)}: ${t('nothing')}</li>`;
         const mins = Math.max(1, Math.round(bd / 80));
-        const name = esc(best.properties.name || t('unnamed'));
-        return `<li><span class="dot" style="background:${COLORS[ty]}"></span><button type="button" data-id="${ty}:${best.id}">${t(ty)}: ${name}</button> <span class="dist">${dist} · ~${mins} ${t('walk')}</span></li>`;
+        const isWater = ty === 'water' || ty === 'refill';
+        return `<li>${swatch(ty)}<button type="button" data-id="${ty}:${esc(best.id)}">${t(ty)}: ${esc(spotName(best.properties))}</button>${badges(best.properties)}
+          <span class="dist">${fmtDist(bd)} · ~${mins} ${t('walk')}</span>
+          ${ty === 'refill' ? `<span class="note">${t('bizNote')}</span>` : ''}
+          ${isWater ? `<span class="note">${t('potability')}</span>` : ''}</li>`;
       })
       .join('') +
     `</ul><p class="note">${t('straight')}</p>`;
-  out.querySelectorAll<HTMLButtonElement>('button[data-id]').forEach((b) =>
-    b.addEventListener('click', () => {
-      const [ty, id] = b.dataset.id!.split(/:(.+)/) as [PlaceType, string];
-      const f = raw[ty].find((x) => x.id === id);
-      if (!f) return;
-      map.flyTo({ center: f.geometry.coordinates, zoom: Math.max(map.getZoom(), 17) });
-      openPopup({ properties: f.properties, coords: f.geometry.coordinates });
-    }),
-  );
+  bindSpotButtons(out);
+}
+
+function placeUserMarker(): void {
+  if (!map || !mapReady || !userPos) return;
+  userMarker?.remove();
+  const el = document.createElement('div');
+  el.className = 'me';
+  userMarker = new maplibregl.Marker({ element: el }).setLngLat(userPos).addTo(map);
 }
 
 function locate(): void {
   const out = $('nearest');
+  openSheet(false);
   if (!('geolocation' in navigator)) {
     out.innerHTML = `<p class="err">${t('unsupported')}</p>`;
     return;
   }
-  out.innerHTML = `<p>${t('locating')}</p>`;
+  out.innerHTML = `<p class="note">${t('locating')}</p>`;
   navigator.geolocation.getCurrentPosition(
     (pos) => {
-      userPos = [pos.coords.longitude, pos.coords.latitude];
-      userMarker?.remove();
-      const el = document.createElement('div');
-      el.className = 'me';
-      userMarker = new maplibregl.Marker({ element: el }).setLngLat(userPos).addTo(map);
-      const inNcr = userPos[0] > 120.9 && userPos[0] < 121.15 && userPos[1] > 14.35 && userPos[1] < 14.78;
+      const here: LngLat = [pos.coords.longitude, pos.coords.latitude];
+      const inNcr = here[0] > 120.9 && here[0] < 121.15 && here[1] > 14.35 && here[1] < 14.78;
       if (!inNcr) {
         out.innerHTML = `<p class="err">${t('outside')}</p>`;
         userPos = null;
         return;
       }
+      userPos = here;
+      placeUserMarker();
       renderNearest();
-      const near = TYPES.flatMap((ty) => {
-        const sorted = filtered(ty)
-          .map((f) => ({ f, d: distM(userPos!, f.geometry.coordinates) }))
-          .sort((a, b) => a.d - b.d);
-        return sorted.slice(0, 1).map((x) => x.f.geometry.coordinates);
+      if (!map || !mapReady || dataState !== 'ready') return;
+      const bounds = new maplibregl.LngLatBounds(here, here);
+      for (const it of nearestItems(here)) if (it.best) bounds.extend(it.best.geometry.coordinates);
+      map.fitBounds(bounds, {
+        padding: { top: 70, left: 50, right: 50, bottom: isMobile() ? Math.round(window.innerHeight * 0.45) : 70 },
+        maxZoom: 16,
       });
-      const bounds = new maplibregl.LngLatBounds(userPos, userPos);
-      near.forEach((c) => bounds.extend(c));
-      map.fitBounds(bounds, { padding: 70, maxZoom: 16 });
     },
     () => {
       out.innerHTML = `<p class="err">${t('denied')}</p>`;
@@ -240,39 +369,104 @@ function locate(): void {
   );
 }
 
+// ---- list of spots in view (keyboard / screen-reader alternative to the map) ----
+function renderList(): void {
+  const el = $('list');
+  const btn = $('list-btn');
+  btn.textContent = listOpen ? t('listHide') : t('list');
+  btn.setAttribute('aria-expanded', String(listOpen));
+  if (!listOpen) {
+    el.innerHTML = '';
+    return;
+  }
+  if (dataState !== 'ready') {
+    el.innerHTML = '';
+    return;
+  }
+  const c = map && mapReady ? map.getCenter() : { lng: 121.0, lat: 14.58 };
+  const center: LngLat = [c.lng, c.lat];
+  const b = map && mapReady ? map.getBounds() : null;
+  const rows = UI_ORDER.filter((ty) => visible[ty])
+    .flatMap((ty) => filtered(ty).map((f) => ({ ty, f, d: distM(center, f.geometry.coordinates) })))
+    .filter(({ f }) => !b || b.contains(f.geometry.coordinates))
+    .sort((a, z) => a.d - z.d)
+    .slice(0, 25);
+  el.innerHTML = rows.length
+    ? `<p class="note">${t('listNote')}</p><ul class="spots">` +
+      rows
+        .map(
+          ({ ty, f, d }) =>
+            `<li>${swatch(ty)}<button type="button" data-id="${ty}:${esc(f.id)}">${esc(spotName(f.properties))}</button>${badges(f.properties)}<span class="dist">${t(ty)} · ${fmtDist(d)}</span></li>`,
+        )
+        .join('') +
+      '</ul>'
+    : `<p class="note">${t('listEmpty')}</p>`;
+  bindSpotButtons(el);
+}
+
+// ---- bottom sheet (mobile) ---------------------------------------------------
+function openSheet(showMore: boolean): void {
+  $('panel').classList.add('open');
+  $('panel').classList.toggle('show-more', showMore);
+  $('chip').setAttribute('aria-expanded', 'true');
+}
+function closeSheet(): void {
+  $('panel').classList.remove('open', 'show-more');
+  $('chip').setAttribute('aria-expanded', 'false');
+}
+
 // ---- UI --------------------------------------------------------------------
+function fmtDate(iso: string): string {
+  try {
+    return new Intl.DateTimeFormat(getLang() === 'tl' ? 'fil-PH' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(iso));
+  } catch {
+    return iso;
+  }
+}
+
 function renderUi(): void {
+  const ready = dataState === 'ready';
   $('layers').innerHTML =
     `<h2>${t('layers')}</h2>` +
-    TYPES.map(
+    UI_ORDER.map(
       (ty) =>
-        `<label class="row"><input type="checkbox" data-layer="${ty}" ${visible[ty] ? 'checked' : ''}><span class="dot" style="background:${COLORS[ty]}"></span>${t(ty)} <small>(${filtered(ty).length})</small></label>`,
+        `<label class="row"><input type="checkbox" data-layer="${ty}" ${visible[ty] ? 'checked' : ''}>${swatch(ty)}<span>${t(ty)} <small>${ready ? `(${filtered(ty).length})` : ''}</small></span></label>`,
     ).join('') +
-    `<p class="note">${t('cluster')}</p>`;
+    `<p class="note">${t('refillHint')}</p><p class="note">${t('cluster')}</p>`;
   $('filters').innerHTML =
     `<h2>${t('filters')}</h2>` +
     (['free', 'wheelchair', 'open'] as const)
       .map((k) => {
         const label: Key = k === 'free' ? 'freeOnly' : k === 'open' ? 'openNow' : 'wheelchair';
-        return `<label class="row"><input type="checkbox" data-filter="${k}" ${filters[k] ? 'checked' : ''}>${t(label)}</label>`;
+        return `<label class="row"><input type="checkbox" data-filter="${k}" ${filters[k] ? 'checked' : ''}><span>${t(label)}</span></label>`;
       })
       .join('');
   $('locate-btn').textContent = '📍 ' + t('locate');
+  $('fab').textContent = '📍 ' + t('fab');
+  $('chip').textContent = t('chip');
+  $('sheet-close').textContent = t('close');
   $('add').innerHTML = `<h2><a id="add-link" href="#" target="_blank" rel="noopener">➕ ${t('add')}</a></h2><p class="note">${t('addNote')}</p>`;
+  const wasOpen = document.querySelector<HTMLDetailsElement>('#footer details')?.open ?? false;
   $('footer').innerHTML =
-    `<span>${meta ? `${t('dataFrom')}: ${esc(meta.fetched)}. ` : ''}${t('disclaimer')}</span> ` +
-    `<span>${t('attribution')} <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors (ODbL)</a></span> ` +
-    `<span>MIT License${DONATE_URL ? ` · <a href="${esc(DONATE_URL)}" target="_blank" rel="noopener">♥ ${t('donate')}</a>` : ''}</span>`;
-  $('lang').textContent = getLang() === 'en' ? 'TL' : 'EN';
+    `<details${wasOpen ? ' open' : ''}><summary>${meta ? `${t('dataFrom')} ${esc(fmtDate(meta.fetched))} · ` : ''}${t('footerShort')} ⓘ</summary>` +
+    `<div class="foot-body"><p>${t('disclaimer')}</p>` +
+    `<p><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors (ODbL)</a> · ${t('tiles')}: <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a></p>` +
+    `<p>MIT License${DONATE_URL ? ` · <a href="${esc(DONATE_URL)}" target="_blank" rel="noopener">♥ ${t('donate')}</a>` : ''}</p></div></details>`;
+  $('lang').textContent = t('langName');
+  $('lang').setAttribute('lang', getLang() === 'en' ? 'tl' : 'en');
+  renderDataState();
+  renderList();
   updateAddLink();
 
   document.querySelectorAll<HTMLInputElement>('[data-layer]').forEach((el) =>
     el.addEventListener('change', () => {
       const ty = el.dataset.layer as PlaceType;
       visible[ty] = el.checked;
-      for (const l of ['clusters', 'count', 'points']) {
-        map.setLayoutProperty(`${ty}-${l}`, 'visibility', el.checked ? 'visible' : 'none');
+      if (map && mapReady) {
+        for (const l of ['clusters', 'count', 'glyph', 'points']) map.setLayoutProperty(`${ty}-${l}`, 'visibility', el.checked ? 'visible' : 'none');
       }
+      renderNearest();
+      renderList();
     }),
   );
   document.querySelectorAll<HTMLInputElement>('[data-filter]').forEach((el) =>
@@ -280,20 +474,54 @@ function renderUi(): void {
       filters[el.dataset.filter as keyof typeof filters] = el.checked;
       refreshSources();
       renderUi();
+      renderNearest();
     }),
   );
 }
 
 function updateAddLink(): void {
-  const c = map?.getCenter();
-  const z = map ? Math.round(map.getZoom()) : 12;
+  const c = map && mapReady ? map.getCenter() : null;
+  const z = map && mapReady ? Math.round(map.getZoom()) : 12;
   const a = document.getElementById('add-link') as HTMLAnchorElement | null;
-  if (a && c) a.href = `https://www.openstreetmap.org/edit#map=${Math.max(z, 16)}/${c.lat.toFixed(5)}/${c.lng.toFixed(5)}`;
+  if (a) a.href = c ? `https://www.openstreetmap.org/edit#map=${Math.max(z, 16)}/${c.lat.toFixed(5)}/${c.lng.toFixed(5)}` : 'https://www.openstreetmap.org/edit';
 }
 
 // ---- map -------------------------------------------------------------------
+function showMapError(): void {
+  const el = $('mapmsg');
+  el.hidden = false;
+  el.innerHTML = `<p>${t('mapError')}</p><button type="button" id="retry-map">${t('retry')}</button>`;
+  document.getElementById('retry-map')?.addEventListener('click', () => {
+    el.hidden = true;
+    map?.remove();
+    map = null;
+    initMap();
+  });
+}
+
+/** Picks the closest visible marker or cluster within a 44 px touch target. */
+function pickAt(pt: maplibregl.Point): { f: maplibregl.MapGeoJSONFeature; cluster: boolean } | null {
+  if (!map || !mapReady) return null;
+  const layers = TYPES.filter((ty) => visible[ty]).flatMap((ty) => [`${ty}-points`, `${ty}-clusters`]);
+  if (!layers.length) return null;
+  const R = 22;
+  const feats = map.queryRenderedFeatures([[pt.x - R, pt.y - R], [pt.x + R, pt.y + R]], { layers });
+  let best: { f: maplibregl.MapGeoJSONFeature; cluster: boolean } | null = null;
+  let bd = Infinity;
+  for (const f of feats) {
+    const p = map.project((f.geometry as unknown as { coordinates: LngLat }).coordinates);
+    const d = Math.hypot(p.x - pt.x, p.y - pt.y);
+    if (d < bd) {
+      bd = d;
+      best = { f, cluster: f.properties.cluster === true };
+    }
+  }
+  return best;
+}
+
 function initMap(): void {
-  map = new maplibregl.Map({
+  mapReady = false;
+  const m = new maplibregl.Map({
     container: 'map',
     style: STYLE_URL,
     center: [121.0, 14.58],
@@ -304,84 +532,130 @@ function initMap(): void {
     ],
     attributionControl: { compact: true },
   });
-  (window as unknown as { __map: maplibregl.Map }).__map = map; // used by scripts/render-preview.mjs
-  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
-  map.on('moveend', updateAddLink);
-  map.on('load', async () => {
-    for (const ty of TYPES) map.addImage(`icon-${ty}`, drawIcon(ty), { pixelRatio: 2 });
-    try {
-      await loadData();
-    } catch {
-      $('nearest').innerHTML = '<p class="err">Could not load map data.</p>';
+  map = m;
+  (window as unknown as { __map: maplibregl.Map }).__map = m; // used by scripts/render-preview.mjs
+  m.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+  m.on('moveend', () => {
+    updateAddLink();
+    if (listOpen) renderList();
+  });
+  // The basemap style has icon gaps; give missing images a blank so MapLibre stays quiet.
+  m.on('styleimagemissing', (e) => {
+    if (!m.hasImage(e.id)) m.addImage(e.id, { width: 1, height: 1, data: new Uint8Array(4) });
+  });
+  m.on('error', () => {
+    if (!mapReady && map === m) showMapError(); // style failed to load; UI keeps working without the map
+  });
+  m.on('load', () => {
+    // The basemap's own POI icons look like ours; hide them (keep transit).
+    for (const l of m.getStyle().layers) {
+      if ((l as { 'source-layer'?: string })['source-layer'] === 'poi' && l.id !== 'poi_transit') m.setLayoutProperty(l.id, 'visibility', 'none');
     }
     for (const ty of TYPES) {
-      map.addSource(ty, {
+      m.addImage(`icon-${ty}`, drawIconCanvas(ty).getContext('2d')!.getImageData(0, 0, 48, 48), { pixelRatio: 2 });
+      m.addImage(`badge-${ty}`, drawBadge(ty), { pixelRatio: 2 });
+    }
+    for (const ty of TYPES) {
+      const vis = visible[ty] ? 'visible' : 'none';
+      const bump = ty === 'water' ? 4 : 0; // water is the product; make its clusters larger
+      const radius = ['step', ['get', 'point_count'], RADII[0] + bump, 10, RADII[1] + bump, 50, RADII[2] + bump, 200, RADII[3] + bump];
+      const off = (r: number) => ['literal', [Math.round((r + bump) * 0.72), -Math.round((r + bump) * 0.72)]];
+      m.addSource(ty, {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: filtered(ty) } as never,
         cluster: true,
         clusterRadius: 45,
         clusterMaxZoom: 15,
       });
-      map.addLayer({
+      m.addLayer({
         id: `${ty}-clusters`,
         type: 'circle',
         source: ty,
         filter: ['has', 'point_count'],
+        layout: { visibility: vis },
         paint: {
           'circle-color': COLORS[ty],
-          'circle-opacity': 0.88,
+          'circle-opacity': 0.92,
           'circle-stroke-color': '#fff',
           'circle-stroke-width': 2,
-          'circle-radius': ['step', ['get', 'point_count'], 14, 10, 18, 50, 24, 200, 30],
+          'circle-radius': radius as never,
         },
       });
-      map.addLayer({
+      m.addLayer({
         id: `${ty}-count`,
         type: 'symbol',
         source: ty,
         filter: ['has', 'point_count'],
-        layout: {
-          'text-field': ['get', 'point_count_abbreviated'],
-          'text-font': ['Noto Sans Bold'],
-          'text-size': 12,
-          'text-allow-overlap': true,
-        },
+        layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-font': ['Noto Sans Bold'], 'text-size': 13, 'text-allow-overlap': true, visibility: vis },
         paint: { 'text-color': '#fff' },
       });
-      map.addLayer({
+      m.addLayer({
+        id: `${ty}-glyph`,
+        type: 'symbol',
+        source: ty,
+        filter: ['has', 'point_count'],
+        layout: {
+          'icon-image': `badge-${ty}`,
+          'icon-size': 0.7,
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
+          'icon-offset': ['step', ['get', 'point_count'], off(RADII[0]), 10, off(RADII[1]), 50, off(RADII[2]), 200, off(RADII[3])] as never,
+          visibility: vis,
+        },
+      });
+      m.addLayer({
         id: `${ty}-points`,
         type: 'symbol',
         source: ty,
         filter: ['!', ['has', 'point_count']],
-        layout: { 'icon-image': `icon-${ty}`, 'icon-size': 0.75, 'icon-allow-overlap': true },
+        layout: { 'icon-image': `icon-${ty}`, 'icon-size': 0.9, 'icon-allow-overlap': true, visibility: vis },
       });
-      map.on('click', `${ty}-clusters`, async (e) => {
-        const f = map.queryRenderedFeatures(e.point, { layers: [`${ty}-clusters`] })[0];
-        if (!f) return;
-        const zoom = await (map.getSource(ty) as GeoJSONSource).getClusterExpansionZoom(f.properties.cluster_id);
-        map.easeTo({ center: (f.geometry as unknown as { coordinates: [number, number] }).coordinates, zoom: zoom + 0.5 });
-      });
-      map.on('click', `${ty}-points`, (e) => {
-        const f = e.features?.[0] as MapGeoJSONFeature | undefined;
-        if (!f) return;
-        const coords = (f.geometry as unknown as { coordinates: [number, number] }).coordinates.slice() as [number, number];
-        openPopup({ properties: f.properties as unknown as Props, coords });
-      });
-      for (const l of ['clusters', 'points']) {
-        map.on('mouseenter', `${ty}-${l}`, () => (map.getCanvas().style.cursor = 'pointer'));
-        map.on('mouseleave', `${ty}-${l}`, () => (map.getCanvas().style.cursor = ''));
-      }
     }
-    renderUi();
+    m.on('click', async (e) => {
+      const hit = pickAt(e.point);
+      if (!hit) return;
+      const coords = (hit.f.geometry as unknown as { coordinates: LngLat }).coordinates.slice() as LngLat;
+      if (hit.cluster) {
+        const zoom = await (m.getSource(hit.f.source) as GeoJSONSource).getClusterExpansionZoom(hit.f.properties.cluster_id);
+        m.easeTo({ center: coords, zoom: zoom + 0.5 });
+      } else {
+        openPopup({ properties: hit.f.properties as unknown as Props, coords });
+      }
+    });
+    m.on('mousemove', (e) => {
+      m.getCanvas().style.cursor = pickAt(e.point) ? 'pointer' : '';
+    });
+    mapReady = true;
+    $('mapmsg').hidden = true;
+    placeUserMarker();
+    updateAddLink();
+    renderList();
   });
 }
 
+// ---- boot ------------------------------------------------------------------
 setLang(navigator.language?.toLowerCase().startsWith('fil') || navigator.language?.toLowerCase().startsWith('tl') ? 'tl' : 'en');
-initMap();
 $('locate-btn').addEventListener('click', locate);
+$('fab').addEventListener('click', locate);
+$('chip').addEventListener('click', () => (document.getElementById('panel')!.classList.contains('open') ? closeSheet() : openSheet(true)));
+$('sheet-close').addEventListener('click', closeSheet);
+$('list-btn').addEventListener('click', () => {
+  listOpen = !listOpen;
+  renderList();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeSheet();
+});
 $('lang').addEventListener('click', () => {
   setLang(getLang() === 'en' ? 'tl' : 'en');
   renderUi();
-  if (userPos) renderNearest();
+  renderNearest();
 });
+renderUi(); // the panel works without the map
+void loadData();
+try {
+  initMap();
+} catch {
+  showMapError();
+}
 $('panel').classList.add('ready');

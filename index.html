@@ -7,6 +7,9 @@
     <meta name="description" content="A free map of drinking water, public toilets and covered shelters in Metro Manila, built from OpenStreetMap." />
     <meta name="theme-color" content="#0b6e99" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preload" href="/data/water.geojson" as="fetch" crossorigin="anonymous" />
+    <link rel="preload" href="/data/toilets.geojson" as="fetch" crossorigin="anonymous" />
+    <link rel="preload" href="/data/shelter.geojson" as="fetch" crossorigin="anonymous" />
 
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Libreng Tubig" />
@@ -34,18 +37,29 @@
   <body>
     <div id="app">
       <header id="topbar">
-        <h1>💧 Libreng Tubig</h1>
-        <button id="lang" type="button" aria-label="Switch language">TL</button>
+        <h1><span aria-hidden="true">💧</span> Libreng Tubig</h1>
+        <button id="lang" type="button">Tagalog</button>
       </header>
-      <div id="map" role="application" aria-label="Map of free water, toilets and shelters"></div>
+      <main id="stage">
+        <div id="map" aria-label="Map of free water, toilets and shelters"></div>
+        <div id="mapmsg" role="status" hidden></div>
+        <button id="chip" type="button"></button>
+        <button id="fab" type="button"></button>
+      </main>
       <aside id="panel">
-        <section id="layers"></section>
-        <section id="filters"></section>
+        <button id="sheet-close" type="button"></button>
         <section id="locate">
           <button id="locate-btn" type="button"></button>
+          <div id="datastatus" aria-live="polite"></div>
           <div id="nearest" aria-live="polite"></div>
+          <button id="list-btn" type="button" aria-expanded="false" aria-controls="list"></button>
+          <div id="list"></div>
         </section>
-        <section id="add"></section>
+        <div id="more">
+          <section id="layers"></section>
+          <section id="filters"></section>
+          <section id="add"></section>
+        </div>
       </aside>
       <footer id="footer"></footer>
     </div>

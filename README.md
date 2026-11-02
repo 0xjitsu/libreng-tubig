@@ -13,7 +13,8 @@
 ## Data
 
 - Source: [OpenStreetMap](https://www.openstreetmap.org) via the [Overpass API](https://overpass-api.de), prebaked into static GeoJSON in `public/data/` (`water`, `toilets`, `shelter`, plus `meta.json`).
-- Tags: `amenity=drinking_water`, `amenity=water_point`, any other feature with `drinking_water=yes` (all shown as *water*), `amenity=toilets`, `amenity=shelter`. Nodes, ways and relations are included (as their centre point).
+- Tags: `amenity=drinking_water`, `amenity=water_point`, any other feature with `drinking_water=yes`, `amenity=toilets`, `amenity=shelter`. Nodes, ways and relations are included (as their centre point).
+- Water is split in the app (`src/classify.ts`): **Public water tap** is `amenity=drinking_water` with no `fee=yes`, no `access=customers|permit` and no refill-shop-style name. Everything else (restaurants, shops, offices, `water_point`, paid, customers-only, refill stations) is **Refill or ask inside**, hidden by default. Spots with `access=private|no` are never shown. The name heuristic is a guess; fix wrong ones in OSM.
 - Area: a **bounding box** around the National Capital Region (`14.35,120.90` to `14.78,121.15`), not the exact admin boundary, so a few spots just outside the NCR border (e.g. in Rizal or Cavite) may appear. The box is defined in `scripts/lib.mjs`.
 - Fetch date: shown in the page footer and stored in `public/data/meta.json`. Current data was fetched **2026-11-02**.
 

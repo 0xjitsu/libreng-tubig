@@ -23,7 +23,7 @@ const page = await browser.newPage({ viewport: { width: W, height: H } });
 await page.goto('http://localhost:4173/');
 await page.waitForFunction(() => window.__map && window.__map.loaded() && window.__map.getSource('shelter'), null, { timeout: 60000 });
 await page.addStyleTag({
-  content: `#topbar,#panel,#footer,.maplibregl-ctrl{display:none!important}#app{display:block!important}#map{height:100vh!important}
+  content: `#topbar,#panel,#footer,#fab,#chip,#mapmsg,.maplibregl-ctrl{display:none!important}#app{display:block!important}#stage{position:fixed!important;inset:0!important}
   #cap{position:fixed;left:40px;bottom:40px;padding:14px 22px;border-radius:14px;background:rgba(11,110,153,.94);color:#fff;font:700 40px system-ui,sans-serif;z-index:9}
   #cap small{display:block;font-weight:500;font-size:22px;opacity:.9;margin-top:4px}`,
 });
@@ -33,7 +33,7 @@ await page.evaluate(() => {
   document.body.appendChild(d);
   const m = window.__map;
   m.resize();
-  for (const ty of ['water', 'toilets', 'shelter']) for (const l of ['clusters', 'count', 'points']) m.setLayoutProperty(`${ty}-${l}`, 'visibility', 'none');
+  for (const ty of ['water', 'toilets', 'shelter']) for (const l of ['clusters', 'count', 'glyph', 'points']) m.setLayoutProperty(`${ty}-${l}`, 'visibility', 'none');
 });
 
 const caps = [
@@ -55,7 +55,7 @@ for (let i = 0; i < FRAMES; i++) {
       const m = window.__map;
       m.jumpTo({ center: [lon, lat], zoom });
       const on = { water: stage >= 1, toilets: stage >= 2, shelter: stage >= 3 };
-      for (const ty of Object.keys(on)) for (const l of ['clusters', 'count', 'points']) m.setLayoutProperty(`${ty}-${l}`, 'visibility', on[ty] ? 'visible' : 'none');
+      for (const ty of Object.keys(on)) for (const l of ['clusters', 'count', 'glyph', 'points']) m.setLayoutProperty(`${ty}-${l}`, 'visibility', on[ty] ? 'visible' : 'none');
       document.getElementById('cap').innerHTML = `${cap[0]}<small>${cap[1]}</small>`;
     },
     [zoom, lon, lat, stage, caps[stage]],
