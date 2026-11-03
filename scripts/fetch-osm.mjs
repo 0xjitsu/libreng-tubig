@@ -18,6 +18,8 @@ const QUERIES = {
 const KEEP = ['name', 'name:en', 'name:tl', 'amenity', 'fee', 'charge', 'opening_hours', 'wheelchair', 'access',
   'changing_table', 'unisex', 'male', 'female', 'bottle', 'covered', 'drinking_water', 'shelter_type',
   'operator', 'description', 'indoor', 'seasonal'];
+// Known bad OSM entries (a home tagged as a shelter).
+const EXCLUDE = new Set(['node/14203821001']);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function overpass(body) {
@@ -66,7 +68,7 @@ let timestamp = null;
 for (const [type, q] of Object.entries(QUERIES)) {
   const json = await overpass(`[out:json][timeout:90];${q}out center tags;`);
   timestamp ||= json.osm3s?.timestamp_osm_base;
-  const features = json.elements.map((e) => toFeature(e, type)).filter(Boolean);
+  const features = json.elements.map((e) => toFeature(e, type)).filter(Boolean).filter((f) => !EXCLUDE.has(f.id));
   features.sort((a, c) => a.id.localeCompare(c.id));
   counts[type] = features.length;
   await writeFile(`public/data/${type}.geojson`, JSON.stringify({ type: 'FeatureCollection', features }) + '\n');

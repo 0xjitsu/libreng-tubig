@@ -43,16 +43,16 @@
       <main id="stage">
         <div id="map" aria-label="Map of free water, toilets and shelters"></div>
         <div id="mapmsg" role="status" hidden></div>
-        <button id="chip" type="button"></button>
-        <button id="fab" type="button"></button>
+        <button id="chip" type="button">Filters &amp; list</button>
+        <button id="fab" type="button">📍 Find nearest</button>
       </main>
       <aside id="panel">
-        <button id="sheet-close" type="button"></button>
+        <button id="sheet-close" type="button">Close</button>
         <section id="locate">
-          <button id="locate-btn" type="button"></button>
-          <div id="datastatus" aria-live="polite"></div>
+          <button id="locate-btn" type="button">📍 Use my location</button>
+          <div id="datastatus" aria-live="polite"><p class="note">Loading spots…</p></div>
           <div id="nearest" aria-live="polite"></div>
-          <button id="list-btn" type="button" aria-expanded="false" aria-controls="list"></button>
+          <button id="list-btn" type="button" aria-expanded="false" aria-controls="list">List spots in view</button>
           <div id="list"></div>
         </section>
         <div id="more">
@@ -61,7 +61,8 @@
           <section id="add"></section>
         </div>
       </aside>
-      <footer id="footer"></footer>
+      <footer id="footer"><details><summary>Not verified safe ⓘ</summary></details></footer>
+      <noscript><p id="shell-note">Libreng Tubig needs JavaScript to show the map of free water, toilets and shade in Metro Manila.</p></noscript>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
