@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Libreng Tubig — free water, toilets and shade in Metro Manila</title>
+    <meta name="description" content="A free map of drinking water, public toilets and covered shelters in Metro Manila, built from OpenStreetMap." />
+    <meta name="theme-color" content="#0b6e99" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preload" href="/data/water.geojson" as="fetch" crossorigin="anonymous" />
+    <link rel="preload" href="/data/toilets.geojson" as="fetch" crossorigin="anonymous" />
+    <link rel="preload" href="/data/shelter.geojson" as="fetch" crossorigin="anonymous" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Libreng Tubig" />
+    <meta property="og:url" content="https://libreng-tubig.vercel.app/" />
+    <meta property="og:title" content="Libreng Tubig — free water, toilets and shade" />
+    <meta property="og:description" content="A free map of drinking water, public toilets and covered shelters in Metro Manila. Built from OpenStreetMap." />
+    <meta property="og:image" content="https://libreng-tubig.vercel.app/og/preview.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:video" content="https://libreng-tubig.vercel.app/og/preview.mp4" />
+    <meta property="og:video:secure_url" content="https://libreng-tubig.vercel.app/og/preview.mp4" />
+    <meta property="og:video:type" content="video/mp4" />
+    <meta property="og:video:width" content="1200" />
+    <meta property="og:video:height" content="630" />
+
+    <meta name="twitter:card" content="player" />
+    <meta name="twitter:title" content="Libreng Tubig — free water, toilets and shade" />
+    <meta name="twitter:description" content="A free map of drinking water, public toilets and covered shelters in Metro Manila." />
+    <meta name="twitter:image" content="https://libreng-tubig.vercel.app/og/preview.png" />
+    <meta name="twitter:player" content="https://libreng-tubig.vercel.app/og/player.html" />
+    <meta name="twitter:player:width" content="1200" />
+    <meta name="twitter:player:height" content="630" />
+  </head>
+  <body>
+    <div id="app">
+      <header id="topbar">
+        <h1><span aria-hidden="true">💧</span> Libreng Tubig</h1>
+        <button id="lang" type="button">Tagalog</button>
+      </header>
+      <main id="stage">
+        <div id="map" aria-label="Map of free water, toilets and shelters"></div>
+        <div id="mapmsg" role="status" hidden></div>
+        <button id="chip" type="button"></button>
+        <button id="fab" type="button"></button>
+      </main>
+      <aside id="panel">
+        <button id="sheet-close" type="button"></button>
+        <section id="locate">
+          <button id="locate-btn" type="button"></button>
+          <div id="datastatus" aria-live="polite"></div>
+          <div id="nearest" aria-live="polite"></div>
+          <button id="list-btn" type="button" aria-expanded="false" aria-controls="list"></button>
+          <div id="list"></div>
+        </section>
+        <div id="more">
+          <section id="layers"></section>
+          <section id="filters"></section>
+          <section id="add"></section>
+        </div>
+      </aside>
+      <footer id="footer"></footer>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

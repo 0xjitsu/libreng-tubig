@@ -1,0 +1,10 @@
+{
+  "outputDirectory": "dist",
+  "buildCommand": "npm run build",
+  "headers": [
+    {
+      "source": "/og/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=86400" }]
+    }
+  ]
+}

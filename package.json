@@ -1,10 +1,22 @@
 {
   "name": "libreng-tubig",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "type": "module",
+  "license": "MIT",
   "scripts": {
-    "lint": "echo 'placeholder: no source yet'",
-    "build": "echo 'placeholder: no source yet'",
-    "smoke": "echo 'placeholder: no source yet'"
+    "dev": "vite",
+    "fetch-data": "node scripts/fetch-osm.mjs",
+    "lint": "tsc --noEmit && node --check scripts/fetch-osm.mjs && node --check scripts/smoke.mjs && bash -n scripts/check-live.sh",
+    "build": "tsc --noEmit && vite build",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "maplibre-gl": "^5.0.0"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.64.1",
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0"
   }
 }
