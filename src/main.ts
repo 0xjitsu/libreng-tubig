@@ -13,7 +13,7 @@ type PlaceType = (typeof TYPES)[number];
 const UI_ORDER: PlaceType[] = ['water', 'refill', 'toilets', 'shelter'];
 const FILES = ['water', 'toilets', 'shelter'] as const;
 // Dark enough for white text (>= 4.5:1); toilets is a neutral so it stays apart from water for colour-blind users.
-const COLORS: Record<PlaceType, string> = { water: '#0369a1', refill: '#0f766e', toilets: '#374151', shelter: '#b45309' };
+const COLORS: Record<PlaceType, string> = { water: '#0369a1', refill: '#0f766e', toilets: '#374151', shelter: '#92400e' };
 const RADII = [14, 18, 24, 30];
 const UNNAMED: Record<PlaceType, Key> = { water: 'unnamedWater', refill: 'unnamedRefill', toilets: 'unnamedToilets', shelter: 'unnamedShelter' };
 
@@ -154,7 +154,8 @@ async function loadData(): Promise<void> {
 
 function passes(f: Feat): boolean {
   const p = f.properties;
-  if (filters.free && p.fee !== 'no') return false;
+  // Shelters have no fee to know about, so "known free only" applies to the rest.
+  if (filters.free && p.type !== 'shelter' && p.fee !== 'no') return false;
   if (filters.wheelchair && p.wheelchair !== 'yes') return false;
   if (filters.open && isOpenNow(p.opening_hours) === false) return false;
   return true;
@@ -202,7 +203,6 @@ function badges(p: Props): string {
 }
 
 function popupHtml(p: Props, coords: LngLat): string {
-  const [lon, lat] = coords;
   const rows: [string, string][] = [];
   rows.push([t('fee'), feeLabel(p)]);
   if (p.opening_hours) {
@@ -222,7 +222,7 @@ function popupHtml(p: Props, coords: LngLat): string {
     if (p.shelter_type) rows.push([t('shelterType'), esc(p.shelter_type.replace(/_/g, ' '))]);
   }
   const [kind, id] = p.osm.split('/');
-  const dir = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}&travelmode=walking`;
+  const dir = dirUrl(coords);
   const edit = `https://www.openstreetmap.org/edit?${kind}=${id}`;
   const caveat = isWater
     ? `<p class="caveat"><strong>${t('potability')}</strong> ${t('osmTagged')}${p.type === 'refill' ? ' ' + t('bizNote') : ''}</p>`
@@ -235,9 +235,21 @@ function popupHtml(p: Props, coords: LngLat): string {
     <a href="${edit}" target="_blank" rel="noopener">${t('edit')}</a></div></div>`;
 }
 
+let popup: maplibregl.Popup | null = null;
+let selected: LngLat | null = null;
 function openPopup(f: { properties: Props; coords: LngLat }): void {
   if (!map || !mapReady) return;
-  new maplibregl.Popup({ maxWidth: '300px', offset: 14 }).setLngLat(f.coords).setHTML(popupHtml(f.properties, f.coords)).addTo(map);
+  popup?.remove();
+  selected = f.coords;
+  const pop = new maplibregl.Popup({ maxWidth: '300px', offset: 14 }).setLngLat(f.coords).setHTML(popupHtml(f.properties, f.coords)).addTo(map);
+  pop.on('close', () => {
+    if (popup === pop) popup = selected = null;
+  });
+  popup = pop;
+}
+function closePopup(): void {
+  popup?.remove();
+  popup = selected = null;
 }
 
 function focusSpot(ty: PlaceType, id: string): void {
@@ -247,6 +259,10 @@ function focusSpot(ty: PlaceType, id: string): void {
   map.flyTo({ center: f.geometry.coordinates, zoom: Math.max(map.getZoom(), 17) });
   openPopup({ properties: f.properties, coords: f.geometry.coordinates });
 }
+
+const dirUrl = (c: LngLat): string => `https://www.google.com/maps/dir/?api=1&destination=${c[1]},${c[0]}&travelmode=walking`;
+const dirLink = (f: Feat): string =>
+  `<a class="dir" href="${dirUrl(f.geometry.coordinates)}" target="_blank" rel="noopener">${t('directions')}<span class="sr"> — ${esc(spotName(f.properties))}</span></a>`;
 
 function bindSpotButtons(root: HTMLElement): void {
   root.querySelectorAll<HTMLButtonElement>('button[data-id]').forEach((b) =>
@@ -318,6 +334,7 @@ function renderNearest(): void {
         const isWater = ty === 'water' || ty === 'refill';
         return `<li>${swatch(ty)}<button type="button" data-id="${ty}:${esc(best.id)}">${t(ty)}: ${esc(spotName(best.properties))}</button>${badges(best.properties)}
           <span class="dist">${fmtDist(bd)} · ~${mins} ${t('walk')}</span>
+          ${dirLink(best)}
           ${ty === 'refill' ? `<span class="note">${t('bizNote')}</span>` : ''}
           ${isWater ? `<span class="note">${t('potability')}</span>` : ''}</li>`;
       })
@@ -396,7 +413,7 @@ function renderList(): void {
       rows
         .map(
           ({ ty, f, d }) =>
-            `<li>${swatch(ty)}<button type="button" data-id="${ty}:${esc(f.id)}">${esc(spotName(f.properties))}</button>${badges(f.properties)}<span class="dist">${t(ty)} · ${fmtDist(d)}</span></li>`,
+            `<li>${swatch(ty)}<button type="button" data-id="${ty}:${esc(f.id)}">${esc(spotName(f.properties))}</button>${badges(f.properties)}<span class="dist">${t(ty)} · ${fmtDist(d)}</span>${dirLink(f)}</li>`,
         )
         .join('') +
       '</ul>'
@@ -406,13 +423,29 @@ function renderList(): void {
 
 // ---- bottom sheet (mobile) ---------------------------------------------------
 function openSheet(showMore: boolean): void {
-  $('panel').classList.add('open');
-  $('panel').classList.toggle('show-more', showMore);
+  const panel = $('panel');
+  panel.classList.add('open');
+  panel.classList.toggle('show-more', showMore);
   $('chip').setAttribute('aria-expanded', 'true');
+  if (!isMobile()) return;
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-label', t('chip'));
+  $('sheet-close').focus({ preventScroll: true });
+  // Keep the selected spot visible above the sheet.
+  if (map && mapReady && selected) {
+    map.easeTo({ center: selected, padding: { top: 0, left: 0, right: 0, bottom: Math.round(window.innerHeight * 0.62) }, duration: 250 });
+  }
 }
 function closeSheet(): void {
-  $('panel').classList.remove('open', 'show-more');
+  const panel = $('panel');
+  const wasOpen = panel.classList.contains('open');
+  panel.classList.remove('open', 'show-more');
+  panel.removeAttribute('role');
+  panel.removeAttribute('aria-label');
   $('chip').setAttribute('aria-expanded', 'false');
+  if (!wasOpen) return;
+  if (map && mapReady) map.easeTo({ padding: { top: 0, left: 0, right: 0, bottom: 0 }, duration: 0 });
+  if (isMobile() && panel.contains(document.activeElement)) $('chip').focus({ preventScroll: true });
 }
 
 // ---- UI --------------------------------------------------------------------
@@ -575,7 +608,7 @@ function initMap(): void {
         layout: { visibility: vis },
         paint: {
           'circle-color': COLORS[ty],
-          'circle-opacity': 0.92,
+          'circle-opacity': 1, // opaque so the white count keeps >= 4.5:1
           'circle-stroke-color': '#fff',
           'circle-stroke-width': 2,
           'circle-radius': radius as never,
@@ -644,7 +677,10 @@ $('list-btn').addEventListener('click', () => {
   renderList();
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeSheet();
+  if (e.key === 'Escape') {
+    closePopup();
+    closeSheet();
+  }
 });
 $('lang').addEventListener('click', () => {
   setLang(getLang() === 'en' ? 'tl' : 'en');

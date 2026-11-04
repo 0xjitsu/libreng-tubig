@@ -25,7 +25,7 @@ await page.waitForFunction(() => window.__map && window.__map.loaded() && window
 await page.addStyleTag({
   content: `#topbar,#panel,#footer,#fab,#chip,#mapmsg,.maplibregl-ctrl{display:none!important}#app{display:block!important}#stage{position:fixed!important;inset:0!important}
   #cap{position:fixed;left:40px;bottom:40px;padding:14px 22px;border-radius:14px;background:rgba(11,110,153,.94);color:#fff;font:700 40px system-ui,sans-serif;z-index:9}
-  #cap small{display:block;font-weight:500;font-size:22px;opacity:.9;margin-top:4px}`,
+  #cap small{display:block;font-weight:500;font-size:24px;opacity:.9;margin-top:4px}`,
 });
 await page.evaluate(() => {
   const d = document.createElement('div');
@@ -41,7 +41,7 @@ const caps = [
   ['💧 Free drinking water', 'Refill your bottle'],
   ['🚻 Public toilets', 'When you need a restroom'],
   ['☂️ Shelter & shade', 'Out of the sun and the rain'],
-  ['💧 Libreng Tubig', 'libreng-tubig.vercel.app'],
+  ['💧 Libreng Tubig', 'Free water, toilets and shade in Metro Manila · libreng-tubig.vercel.app'],
 ];
 for (let i = 0; i < FRAMES; i++) {
   const p = i / (FRAMES - 1);
