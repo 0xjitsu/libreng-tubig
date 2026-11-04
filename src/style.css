@@ -52,11 +52,12 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, 'Se
 @media (pointer: coarse) {
   .maplibregl-ctrl-group button { width: 44px; height: 44px; }
   .maplibregl-ctrl-attrib-button { width: 44px; height: 44px; }
+  .maplibregl-ctrl-attrib a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 8px; }
 }
 @media (max-width: 760px) {
   #app { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; grid-template-areas: 'top' 'stage' 'foot'; }
   #chip, #fab { display: block; position: absolute; z-index: 4; border: 0; cursor: pointer; font-weight: 700; box-shadow: 0 2px 8px #0004; }
-  #mapmsg { top: 66px; right: 12px; }
+  #mapmsg { top: 66px; }
   #chip { top: 10px; left: 10px; min-height: 44px; padding: 0 16px; border-radius: 22px; background: #fff; color: #0b6e99; font-size: 15px; }
   #fab { left: 50%; transform: translateX(-50%); bottom: calc(64px + env(safe-area-inset-bottom)); min-height: 52px; padding: 0 24px; border-radius: 26px; background: #0b6e99; color: #fff; font-size: 16px; white-space: nowrap; }
   #panel { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; max-height: 62dvh; border: 0; border-top: 1px solid #d5e0e7; border-radius: 16px 16px 0 0; box-shadow: 0 -4px 16px #0003; padding-bottom: calc(14px + env(safe-area-inset-bottom)); transform: translateY(105%); visibility: hidden; transition: transform .2s, visibility .2s; }
@@ -65,3 +66,6 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, 'Se
   #more { display: none; }
   #panel.show-more #more { display: block; }
 }
+#detail { margin-top: 10px; }
+#detail:focus { outline: none; }
+#detail .pop { border: 1px solid #d5e0e7; border-radius: 8px; padding: 8px 10px; background: #fff; }

@@ -21,11 +21,11 @@ function tag(key, value) {
 const abs = new RegExp(`^${BASE.replace(/\./g, '\\.')}/`);
 tag('og:title', /\S/);
 tag('og:description', /\S/);
-tag('og:image', new RegExp(`^${BASE.replace(/\./g, '\\.')}/.+\\.png$`));
+tag('og:image', new RegExp(`^${BASE.replace(/\./g, '\\.')}/.+\\.png(\\?v=\\w+)?$`));
 tag('og:image:width', '1200');
 tag('og:image:height', '630');
-tag('og:video', `${BASE}/og/preview.mp4`);
-tag('og:video:secure_url', `${BASE}/og/preview.mp4`);
+tag('og:video', new RegExp(`^${BASE.replace(/\./g, '\\.')}/og/preview\\.mp4\\?v=\\w+$`));
+tag('og:video:secure_url', new RegExp(`^${BASE.replace(/\./g, '\\.')}/og/preview\\.mp4\\?v=\\w+$`));
 tag('og:video:type', 'video/mp4');
 tag('og:video:width', /^\d+$/);
 tag('og:video:height', /^\d+$/);

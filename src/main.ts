@@ -237,11 +237,13 @@ function popupHtml(p: Props, coords: LngLat): string {
 
 let popup: maplibregl.Popup | null = null;
 let selected: LngLat | null = null;
+let popupTrigger: (() => HTMLElement | null) | null = null;
 function openPopup(f: { properties: Props; coords: LngLat }): void {
   if (!map || !mapReady) return;
   popup?.remove();
   selected = f.coords;
-  const pop = new maplibregl.Popup({ maxWidth: '300px', offset: 14 }).setLngLat(f.coords).setHTML(popupHtml(f.properties, f.coords)).addTo(map);
+  // On mobile the bottom sheet covers the lower map, so the popup sits above the spot.
+  const pop = new maplibregl.Popup({ maxWidth: '300px', offset: 14, ...(isMobile() ? { anchor: 'bottom' as const } : {}) }).setLngLat(f.coords).setHTML(popupHtml(f.properties, f.coords)).addTo(map);
   pop.on('close', () => {
     if (popup === pop) popup = selected = null;
   });
@@ -252,9 +254,32 @@ function closePopup(): void {
   popup = selected = null;
 }
 
+/** Map-down fallback: show the spot's details inline in the panel instead of a popup. */
+function showDetail(f: Feat): void {
+  const el = $('detail');
+  el.innerHTML = popupHtml(f.properties, f.geometry.coordinates) + `<button type="button" class="link" id="detail-close">${t('close')}</button>`;
+  document.getElementById('detail-close')?.addEventListener('click', clearDetail);
+  el.focus({ preventScroll: false });
+}
+function clearDetail(): void {
+  $('detail').innerHTML = '';
+}
+
+/** Height of the bottom sheet that overlaps the map (0 on desktop or when closed). */
+function sheetOverlap(): number {
+  const panel = $('panel');
+  if (!isMobile() || !panel.classList.contains('open') || !map) return 0;
+  const mapBottom = map.getContainer().getBoundingClientRect().bottom;
+  return Math.max(0, Math.round(mapBottom - (window.innerHeight - panel.offsetHeight)));
+}
+
 function focusSpot(ty: PlaceType, id: string): void {
   const f = raw[ty].find((x) => x.id === id);
-  if (!f || !map || !mapReady) return;
+  if (!f) return;
+  if (!map || !mapReady) {
+    showDetail(f);
+    return;
+  }
   if (isMobile()) closeSheet();
   map.flyTo({ center: f.geometry.coordinates, zoom: Math.max(map.getZoom(), 17) });
   openPopup({ properties: f.properties, coords: f.geometry.coordinates });
@@ -268,6 +293,8 @@ function bindSpotButtons(root: HTMLElement): void {
   root.querySelectorAll<HTMLButtonElement>('button[data-id]').forEach((b) =>
     b.addEventListener('click', () => {
       const [ty, id] = b.dataset.id!.split(/:(.+)/) as [PlaceType, string];
+      const want = b.dataset.id!;
+      popupTrigger = () => [...root.querySelectorAll<HTMLButtonElement>('button[data-id]')].find((x) => x.dataset.id === want) ?? null;
       focusSpot(ty, id);
     }),
   );
@@ -372,10 +399,11 @@ function locate(): void {
       placeUserMarker();
       renderNearest();
       if (!map || !mapReady || dataState !== 'ready') return;
+      const bottom = sheetOverlap(); // measured after results render, so it is the real sheet height
       const bounds = new maplibregl.LngLatBounds(here, here);
       for (const it of nearestItems(here)) if (it.best) bounds.extend(it.best.geometry.coordinates);
       map.fitBounds(bounds, {
-        padding: { top: 70, left: 50, right: 50, bottom: isMobile() ? Math.round(window.innerHeight * 0.45) : 70 },
+        padding: { top: 70, left: 50, right: 50, bottom: 70 + bottom },
         maxZoom: 16,
       });
     },
@@ -409,7 +437,7 @@ function renderList(): void {
     .sort((a, z) => a.d - z.d)
     .slice(0, 25);
   el.innerHTML = rows.length
-    ? `<p class="note">${t('listNote')}</p><ul class="spots">` +
+    ? `<p class="note">${t(b ? 'listNote' : 'listNoteNoMap')}</p><ul class="spots">` +
       rows
         .map(
           ({ ty, f, d }) =>
@@ -422,18 +450,38 @@ function renderList(): void {
 }
 
 // ---- bottom sheet (mobile) ---------------------------------------------------
+let sheetFocusTimer = 0;
 function openSheet(showMore: boolean): void {
   const panel = $('panel');
+  const wasOpen = panel.classList.contains('open');
   panel.classList.add('open');
   panel.classList.toggle('show-more', showMore);
   $('chip').setAttribute('aria-expanded', 'true');
   if (!isMobile()) return;
   panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-modal', 'true');
   panel.setAttribute('aria-label', t('chip'));
-  $('sheet-close').focus({ preventScroll: true });
-  // Keep the selected spot visible above the sheet.
+  // Focus only once the sheet is visible; focus() on a visibility:hidden element is a no-op.
+  const focusClose = (): void => {
+    window.clearTimeout(sheetFocusTimer);
+    panel.removeEventListener('transitionend', onEnd);
+    if (panel.classList.contains('open')) $('sheet-close').focus({ preventScroll: true });
+  };
+  const onEnd = (e: TransitionEvent): void => {
+    if (e.target === panel && e.propertyName === 'transform') focusClose();
+  };
+  if (wasOpen || window.matchMedia('(prefers-reduced-motion: reduce)').matches) focusClose();
+  else {
+    panel.addEventListener('transitionend', onEnd);
+    sheetFocusTimer = window.setTimeout(focusClose, 400); // fallback if transitionend never fires
+  }
+  // Keep the selected spot, and its popup above it, visible over the sheet.
   if (map && mapReady && selected) {
-    map.easeTo({ center: selected, padding: { top: 0, left: 0, right: 0, bottom: Math.round(window.innerHeight * 0.62) }, duration: 250 });
+    const overlap = sheetOverlap();
+    const visibleH = map.getContainer().clientHeight - overlap;
+    const popH = (popup?.getElement()?.offsetHeight ?? 0) + 14;
+    const y = Math.min(visibleH - 24, Math.max(visibleH / 2, popH + 16)); // spot's target y within the visible strip
+    map.easeTo({ center: selected, padding: { top: 0, left: 0, right: 0, bottom: overlap }, offset: [0, y - visibleH / 2], duration: 250 });
   }
 }
 function closeSheet(): void {
@@ -441,6 +489,8 @@ function closeSheet(): void {
   const wasOpen = panel.classList.contains('open');
   panel.classList.remove('open', 'show-more');
   panel.removeAttribute('role');
+  panel.removeAttribute('aria-modal');
+  window.clearTimeout(sheetFocusTimer);
   panel.removeAttribute('aria-label');
   $('chip').setAttribute('aria-expanded', 'false');
   if (!wasOpen) return;
@@ -652,12 +702,17 @@ function initMap(): void {
         const zoom = await (m.getSource(hit.f.source) as GeoJSONSource).getClusterExpansionZoom(hit.f.properties.cluster_id);
         m.easeTo({ center: coords, zoom: zoom + 0.5 });
       } else {
+        popupTrigger = () => m.getCanvas();
         openPopup({ properties: hit.f.properties as unknown as Props, coords });
       }
     });
     m.on('mousemove', (e) => {
       m.getCanvas().style.cursor = pickAt(e.point) ? 'pointer' : '';
     });
+    // Attribution stays one tap away (and in the footer) but starts collapsed.
+    const attrib = m.getContainer().querySelector('.maplibregl-ctrl-attrib');
+    attrib?.removeAttribute('open');
+    attrib?.classList.remove('maplibregl-compact-show');
     mapReady = true;
     $('mapmsg').hidden = true;
     placeUserMarker();
@@ -678,8 +733,14 @@ $('list-btn').addEventListener('click', () => {
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
+    const hadPopup = !!popup;
+    const trigger = popupTrigger;
     closePopup();
     closeSheet();
+    clearDetail();
+    if (hadPopup && !isMobile() && (!document.activeElement || document.activeElement === document.body)) {
+      (trigger?.() ?? map?.getCanvas())?.focus({ preventScroll: true });
+    }
   }
 });
 $('lang').addEventListener('click', () => {
