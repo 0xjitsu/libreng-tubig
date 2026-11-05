@@ -6,6 +6,7 @@ import { isOpenNow } from './hours';
 import { isHidden, waterGroup } from './classify';
 
 const DONATE_URL = 'https://github.com/sponsors/0xjitsu'; // TODO: placeholder until the account is chosen; empty string hides the link
+const PC = ['coalesce', ['get', 'point_count'], 0]; // clusters only; 0 keeps step expressions numeric for plain points
 const STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty'; // OpenFreeMap: free, no key
 // Layer draw order, bottom to top: water goes last so it is never buried.
 const TYPES = ['refill', 'toilets', 'shelter', 'water'] as const;
@@ -237,13 +238,15 @@ function popupHtml(p: Props, coords: LngLat): string {
 
 let popup: maplibregl.Popup | null = null;
 let selected: LngLat | null = null;
+let selectedProps: Props | null = null;
 let popupTrigger: (() => HTMLElement | null) | null = null;
-function openPopup(f: { properties: Props; coords: LngLat }): void {
+// anchorBottom is only for the sheet-reopen path; otherwise MapLibre auto-flips the popup to stay on screen.
+function openPopup(f: { properties: Props; coords: LngLat }, anchorBottom = false): void {
   if (!map || !mapReady) return;
   popup?.remove();
   selected = f.coords;
-  // On mobile the bottom sheet covers the lower map, so the popup sits above the spot.
-  const pop = new maplibregl.Popup({ maxWidth: '300px', offset: 14, ...(isMobile() ? { anchor: 'bottom' as const } : {}) }).setLngLat(f.coords).setHTML(popupHtml(f.properties, f.coords)).addTo(map);
+  selectedProps = f.properties;
+  const pop = new maplibregl.Popup({ maxWidth: '300px', offset: 14, ...(anchorBottom ? { anchor: 'bottom' as const } : {}) }).setLngLat(f.coords).setHTML(popupHtml(f.properties, f.coords)).addTo(map);
   pop.on('close', () => {
     if (popup === pop) popup = selected = null;
   });
@@ -451,6 +454,10 @@ function renderList(): void {
 
 // ---- bottom sheet (mobile) ---------------------------------------------------
 let sheetFocusTimer = 0;
+/** While the modal sheet is open, keep Tab (and screen readers) inside it. */
+function setBackgroundInert(on: boolean): void {
+  for (const id of ['topbar', 'stage', 'footer']) document.getElementById(id)?.toggleAttribute('inert', on);
+}
 function openSheet(showMore: boolean): void {
   const panel = $('panel');
   const wasOpen = panel.classList.contains('open');
@@ -460,6 +467,7 @@ function openSheet(showMore: boolean): void {
   if (!isMobile()) return;
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-modal', 'true');
+  setBackgroundInert(true);
   panel.setAttribute('aria-label', t('chip'));
   // Focus only once the sheet is visible; focus() on a visibility:hidden element is a no-op.
   const focusClose = (): void => {
@@ -478,9 +486,12 @@ function openSheet(showMore: boolean): void {
   // Keep the selected spot, and its popup above it, visible over the sheet.
   if (map && mapReady && selected) {
     const overlap = sheetOverlap();
+    // Re-open the popup anchored above the spot so it sits in the strip above the sheet.
+    if (selectedProps) openPopup({ properties: selectedProps, coords: selected }, true);
     const visibleH = map.getContainer().clientHeight - overlap;
     const popH = (popup?.getElement()?.offsetHeight ?? 0) + 14;
-    const y = Math.min(visibleH - 24, Math.max(visibleH / 2, popH + 16)); // spot's target y within the visible strip
+    const chipBottom = $('chip').getBoundingClientRect().bottom - map.getContainer().getBoundingClientRect().top;
+    const y = Math.min(visibleH - 24, Math.max(visibleH / 2, popH + 16, popH + chipBottom + 8)); // spot's target y within the visible strip, popup clear of the Filters chip
     map.easeTo({ center: selected, padding: { top: 0, left: 0, right: 0, bottom: overlap }, offset: [0, y - visibleH / 2], duration: 250 });
   }
 }
@@ -490,6 +501,7 @@ function closeSheet(): void {
   panel.classList.remove('open', 'show-more');
   panel.removeAttribute('role');
   panel.removeAttribute('aria-modal');
+  setBackgroundInert(false);
   window.clearTimeout(sheetFocusTimer);
   panel.removeAttribute('aria-label');
   $('chip').setAttribute('aria-expanded', 'false');
@@ -641,7 +653,7 @@ function initMap(): void {
     for (const ty of TYPES) {
       const vis = visible[ty] ? 'visible' : 'none';
       const bump = ty === 'water' ? 4 : 0; // water is the product; make its clusters larger
-      const radius = ['step', ['get', 'point_count'], RADII[0] + bump, 10, RADII[1] + bump, 50, RADII[2] + bump, 200, RADII[3] + bump];
+      const radius = ['step', PC, RADII[0] + bump, 10, RADII[1] + bump, 50, RADII[2] + bump, 200, RADII[3] + bump];
       const off = (r: number) => ['literal', [Math.round((r + bump) * 0.72), -Math.round((r + bump) * 0.72)]];
       m.addSource(ty, {
         type: 'geojson',
@@ -682,7 +694,7 @@ function initMap(): void {
           'icon-size': 0.7,
           'icon-allow-overlap': true,
           'icon-ignore-placement': true,
-          'icon-offset': ['step', ['get', 'point_count'], off(RADII[0]), 10, off(RADII[1]), 50, off(RADII[2]), 200, off(RADII[3])] as never,
+          'icon-offset': ['step', PC, off(RADII[0]), 10, off(RADII[1]), 50, off(RADII[2]), 200, off(RADII[3])] as never,
           visibility: vis,
         },
       });

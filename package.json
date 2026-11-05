@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "vite",
     "fetch-data": "node scripts/fetch-osm.mjs",
-    "lint": "tsc --noEmit && node --check scripts/fetch-osm.mjs && node --check scripts/smoke.mjs && bash -n scripts/check-live.sh",
+    "test:classify": "node scripts/classify-test.mjs",
+    "lint": "tsc --noEmit && node --check scripts/fetch-osm.mjs && node --check scripts/smoke.mjs && node scripts/classify-test.mjs && bash -n scripts/check-live.sh",
     "build": "tsc --noEmit && vite build",
     "smoke": "node scripts/smoke.mjs"
   },
