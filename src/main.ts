@@ -238,15 +238,13 @@ function popupHtml(p: Props, coords: LngLat): string {
 
 let popup: maplibregl.Popup | null = null;
 let selected: LngLat | null = null;
-let selectedProps: Props | null = null;
 let popupTrigger: (() => HTMLElement | null) | null = null;
-// anchorBottom is only for the sheet-reopen path; otherwise MapLibre auto-flips the popup to stay on screen.
-function openPopup(f: { properties: Props; coords: LngLat }, anchorBottom = false): void {
+// No fixed anchor: MapLibre auto-flips the popup to stay on screen.
+function openPopup(f: { properties: Props; coords: LngLat }): void {
   if (!map || !mapReady) return;
   popup?.remove();
   selected = f.coords;
-  selectedProps = f.properties;
-  const pop = new maplibregl.Popup({ maxWidth: '300px', offset: 14, ...(anchorBottom ? { anchor: 'bottom' as const } : {}) }).setLngLat(f.coords).setHTML(popupHtml(f.properties, f.coords)).addTo(map);
+  const pop = new maplibregl.Popup({ maxWidth: '300px', offset: 14 }).setLngLat(f.coords).setHTML(popupHtml(f.properties, f.coords)).addTo(map);
   pop.on('close', () => {
     if (popup === pop) popup = selected = null;
   });
@@ -265,7 +263,10 @@ function showDetail(f: Feat): void {
   el.focus({ preventScroll: false });
 }
 function clearDetail(): void {
-  $('detail').innerHTML = '';
+  const d = $('detail');
+  const hadFocus = d.contains(document.activeElement);
+  d.innerHTML = '';
+  if (hadFocus) popupTrigger?.()?.focus({ preventScroll: true });
 }
 
 /** Height of the bottom sheet that overlaps the map (0 on desktop or when closed). */
@@ -456,6 +457,7 @@ function renderList(): void {
 let sheetFocusTimer = 0;
 /** While the modal sheet is open, keep Tab (and screen readers) inside it. */
 function setBackgroundInert(on: boolean): void {
+  if (on && !isMobile()) return; // never inert on desktop
   for (const id of ['topbar', 'stage', 'footer']) document.getElementById(id)?.toggleAttribute('inert', on);
 }
 function openSheet(showMore: boolean): void {
@@ -467,13 +469,15 @@ function openSheet(showMore: boolean): void {
   if (!isMobile()) return;
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-modal', 'true');
-  setBackgroundInert(true);
   panel.setAttribute('aria-label', t('chip'));
   // Focus only once the sheet is visible; focus() on a visibility:hidden element is a no-op.
   const focusClose = (): void => {
     window.clearTimeout(sheetFocusTimer);
     panel.removeEventListener('transitionend', onEnd);
-    if (panel.classList.contains('open')) $('sheet-close').focus({ preventScroll: true });
+    if (panel.classList.contains('open') && isMobile()) {
+      $('sheet-close').focus({ preventScroll: true });
+      setBackgroundInert(true); // only after focus is inside the sheet
+    }
   };
   const onEnd = (e: TransitionEvent): void => {
     if (e.target === panel && e.propertyName === 'transform') focusClose();
@@ -483,16 +487,13 @@ function openSheet(showMore: boolean): void {
     panel.addEventListener('transitionend', onEnd);
     sheetFocusTimer = window.setTimeout(focusClose, 400); // fallback if transitionend never fires
   }
-  // Keep the selected spot, and its popup above it, visible over the sheet.
+  // The sheet's nearest rows already give name, caveat and Directions, so drop the popup
+  // (it would sit inside the inert map) and keep the selected spot centred in the visible strip.
   if (map && mapReady && selected) {
+    const spot = selected;
+    closePopup();
     const overlap = sheetOverlap();
-    // Re-open the popup anchored above the spot so it sits in the strip above the sheet.
-    if (selectedProps) openPopup({ properties: selectedProps, coords: selected }, true);
-    const visibleH = map.getContainer().clientHeight - overlap;
-    const popH = (popup?.getElement()?.offsetHeight ?? 0) + 14;
-    const chipBottom = $('chip').getBoundingClientRect().bottom - map.getContainer().getBoundingClientRect().top;
-    const y = Math.min(visibleH - 24, Math.max(visibleH / 2, popH + 16, popH + chipBottom + 8)); // spot's target y within the visible strip, popup clear of the Filters chip
-    map.easeTo({ center: selected, padding: { top: 0, left: 0, right: 0, bottom: overlap }, offset: [0, y - visibleH / 2], duration: 250 });
+    map.easeTo({ center: spot, padding: { top: 0, left: 0, right: 0, bottom: overlap }, offset: [0, 0], duration: 250 });
   }
 }
 function closeSheet(): void {
@@ -739,6 +740,9 @@ $('locate-btn').addEventListener('click', locate);
 $('fab').addEventListener('click', locate);
 $('chip').addEventListener('click', () => (document.getElementById('panel')!.classList.contains('open') ? closeSheet() : openSheet(true)));
 $('sheet-close').addEventListener('click', closeSheet);
+window.matchMedia('(max-width: 760px)').addEventListener('change', (e) => {
+  if (!e.matches) closeSheet();
+});
 $('list-btn').addEventListener('click', () => {
   listOpen = !listOpen;
   renderList();
