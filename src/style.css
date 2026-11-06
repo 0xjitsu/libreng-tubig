@@ -20,7 +20,7 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, 'Se
 .row input { width: 22px; height: 22px; flex: none; }
 .swatch { vertical-align: middle; margin-right: 6px; flex: none; }
 .row .swatch { margin-right: 0; }
-.note { font-size: 13px; color: #4b6272; margin: 6px 0; }
+.note { font-size: 13px; color: #3a505f; margin: 6px 0; }
 .err { color: #b3261e; font-size: 14px; }
 .badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 6px; border-radius: 4px; background: #fdecc8; color: #5a3a00; }
 .link { background: none; border: 0; padding: 10px 4px; min-height: 44px; color: #0b6e99; text-decoration: underline; font: inherit; cursor: pointer; }
@@ -30,7 +30,7 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, 'Se
 #nearest ul, #list ul { list-style: none; padding: 0; margin: 0; }
 #nearest li, #list li { padding: 6px 0; font-size: 14px; border-bottom: 1px solid #e3ebf0; }
 #nearest li button, #list li button { background: none; border: 0; padding: 10px 0; min-height: 44px; color: #0b6e99; text-decoration: underline; cursor: pointer; font: inherit; text-align: left; }
-.dist, #nearest li .note { display: block; margin-left: 28px; font-size: 13px; color: #4b6272; }
+.dist, #nearest li .note { display: block; margin-left: 28px; font-size: 13px; color: #3a505f; }
 #footer { grid-area: foot; position: relative; background: #fff; border-top: 1px solid #d5e0e7; font-size: 13px; padding: 0 calc(14px + env(safe-area-inset-right)) env(safe-area-inset-bottom) calc(14px + env(safe-area-inset-left)); }
 #footer summary { cursor: pointer; display: flex; align-items: center; min-height: 44px; color: #35566a; }
 #footer a { color: #0b6e99; display: inline-flex; align-items: center; min-height: 44px; padding: 0 4px; }
@@ -42,7 +42,7 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, 'Se
 .pop h3 { margin: 0 0 2px; font-size: 16px; color: #12202b; }
 .pop .kind { font-size: 13px; color: #35566a; margin-bottom: 6px; }
 .pop dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0 0 8px; font-size: 13px; }
-.pop dt { color: #4b6272; }
+.pop dt { color: #3a505f; }
 .pop dd { margin: 0; }
 .caveat { font-size: 13px; margin: 0 0 8px; padding: 6px 8px; background: #fff7e0; border-left: 3px solid #b45309; }
 .pop-links { display: flex; flex-wrap: wrap; gap: 0 14px; font-size: 14px; }
@@ -52,11 +52,13 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, 'Se
 @media (pointer: coarse) {
   .maplibregl-ctrl-group button { width: 44px; height: 44px; }
   .maplibregl-ctrl-attrib-button { width: 44px; height: 44px; }
+  .maplibregl-ctrl-bottom-right { margin-bottom: 10px; }
+  .maplibregl-ctrl-attrib a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 8px; }
 }
 @media (max-width: 760px) {
   #app { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; grid-template-areas: 'top' 'stage' 'foot'; }
   #chip, #fab { display: block; position: absolute; z-index: 4; border: 0; cursor: pointer; font-weight: 700; box-shadow: 0 2px 8px #0004; }
-  #mapmsg { top: 66px; right: 12px; }
+  #mapmsg { top: 66px; }
   #chip { top: 10px; left: 10px; min-height: 44px; padding: 0 16px; border-radius: 22px; background: #fff; color: #0b6e99; font-size: 15px; }
   #fab { left: 50%; transform: translateX(-50%); bottom: calc(64px + env(safe-area-inset-bottom)); min-height: 52px; padding: 0 24px; border-radius: 26px; background: #0b6e99; color: #fff; font-size: 16px; white-space: nowrap; }
   #panel { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; max-height: 62dvh; border: 0; border-top: 1px solid #d5e0e7; border-radius: 16px 16px 0 0; box-shadow: 0 -4px 16px #0003; padding-bottom: calc(14px + env(safe-area-inset-bottom)); transform: translateY(105%); visibility: hidden; transition: transform .2s, visibility .2s; }
@@ -64,4 +66,15 @@ html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, 'Se
   #sheet-close { display: block; margin-left: auto; min-height: 44px; min-width: 44px; padding: 0 14px; border: 0; background: none; color: #0b6e99; font-size: 15px; font-weight: 600; cursor: pointer; }
   #more { display: none; }
   #panel.show-more #more { display: block; }
+}
+#detail { margin-top: 10px; }
+#detail:focus-visible { outline: 3px solid #0b6e99; outline-offset: 2px; border-radius: 8px; }
+#detail .pop { border: 1px solid #d5e0e7; border-radius: 8px; padding: 8px 10px; background: #fff; }
+@media (prefers-reduced-motion: reduce) {
+  #panel { transition: none; }
+}
+.maplibregl-ctrl-attrib-button { background-repeat: no-repeat; background-position: center; }
+@media (max-width: 760px) {
+  /* Keep the opened attribution (and its links) clear of the Find nearest button. */
+  #stage:has(.maplibregl-compact-show) #fab { display: none; }
 }
