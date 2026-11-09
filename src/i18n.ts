@@ -9,7 +9,7 @@ const dict = {
     shelter: 'Shelter / shade',
     layers: 'Layers and legend',
     filters: 'Filters',
-    freeOnly: 'Known free only',
+    freeOnly: 'Known free only (shelters always shown)',
     wheelchair: 'Wheelchair accessible',
     openNow: 'Open now (hide spots known to be closed)',
     locate: 'Use my location',
@@ -32,6 +32,7 @@ const dict = {
     list: 'List spots in view',
     listHide: 'Hide list',
     listNote: 'Closest to the map centre, within the current view.',
+    listNoteNoMap: 'Closest to central Metro Manila. The map is unavailable, so this is not limited to a view.',
     listEmpty: 'Nothing in view. Zoom out or pan the map.',
     add: 'Add a missing spot',
     addNote:
@@ -82,7 +83,7 @@ const dict = {
     shelter: 'Silungan / lilim',
     layers: 'Mga layer at gabay sa simbolo',
     filters: 'Mga filter',
-    freeOnly: 'Kumpirmadong libre lang',
+    freeOnly: 'Kumpirmadong libre lang (laging kasama ang silungan)',
     wheelchair: 'Pwede ang wheelchair',
     openNow: 'Bukas ngayon (itago ang alam na sarado)',
     locate: 'Gamitin ang lokasyon ko',
@@ -105,6 +106,7 @@ const dict = {
     list: 'Ilista ang mga lugar sa mapa',
     listHide: 'Itago ang listahan',
     listNote: 'Pinakamalapit sa gitna ng mapa, sa loob ng kasalukuyang view.',
+    listNoteNoMap: 'Pinakamalapit sa gitna ng Metro Manila. Walang mapa, kaya hindi limitado sa isang view.',
     listEmpty: 'Walang makita sa view na ito. Mag-zoom out o i-pan ang mapa.',
     add: 'Magdagdag ng kulang na lugar',
     addNote:

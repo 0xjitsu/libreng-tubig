@@ -6,6 +6,7 @@ import { isOpenNow } from './hours';
 import { isHidden, waterGroup } from './classify';
 
 const DONATE_URL = 'https://github.com/sponsors/0xjitsu'; // TODO: placeholder until the account is chosen; empty string hides the link
+const PC = ['coalesce', ['get', 'point_count'], 0]; // clusters only; 0 keeps step expressions numeric for plain points
 const STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty'; // OpenFreeMap: free, no key
 // Layer draw order, bottom to top: water goes last so it is never buried.
 const TYPES = ['refill', 'toilets', 'shelter', 'water'] as const;
@@ -237,6 +238,8 @@ function popupHtml(p: Props, coords: LngLat): string {
 
 let popup: maplibregl.Popup | null = null;
 let selected: LngLat | null = null;
+let popupTrigger: (() => HTMLElement | null) | null = null;
+// No fixed anchor: MapLibre auto-flips the popup to stay on screen.
 function openPopup(f: { properties: Props; coords: LngLat }): void {
   if (!map || !mapReady) return;
   popup?.remove();
@@ -252,9 +255,35 @@ function closePopup(): void {
   popup = selected = null;
 }
 
+/** Map-down fallback: show the spot's details inline in the panel instead of a popup. */
+function showDetail(f: Feat): void {
+  const el = $('detail');
+  el.innerHTML = popupHtml(f.properties, f.geometry.coordinates) + `<button type="button" class="link" id="detail-close">${t('close')}</button>`;
+  document.getElementById('detail-close')?.addEventListener('click', clearDetail);
+  el.focus({ preventScroll: false });
+}
+function clearDetail(): void {
+  const d = $('detail');
+  const hadFocus = d.contains(document.activeElement);
+  d.innerHTML = '';
+  if (hadFocus) popupTrigger?.()?.focus({ preventScroll: true });
+}
+
+/** Height of the bottom sheet that overlaps the map (0 on desktop or when closed). */
+function sheetOverlap(): number {
+  const panel = $('panel');
+  if (!isMobile() || !panel.classList.contains('open') || !map) return 0;
+  const mapBottom = map.getContainer().getBoundingClientRect().bottom;
+  return Math.max(0, Math.round(mapBottom - (window.innerHeight - panel.offsetHeight)));
+}
+
 function focusSpot(ty: PlaceType, id: string): void {
   const f = raw[ty].find((x) => x.id === id);
-  if (!f || !map || !mapReady) return;
+  if (!f) return;
+  if (!map || !mapReady) {
+    showDetail(f);
+    return;
+  }
   if (isMobile()) closeSheet();
   map.flyTo({ center: f.geometry.coordinates, zoom: Math.max(map.getZoom(), 17) });
   openPopup({ properties: f.properties, coords: f.geometry.coordinates });
@@ -268,6 +297,8 @@ function bindSpotButtons(root: HTMLElement): void {
   root.querySelectorAll<HTMLButtonElement>('button[data-id]').forEach((b) =>
     b.addEventListener('click', () => {
       const [ty, id] = b.dataset.id!.split(/:(.+)/) as [PlaceType, string];
+      const want = b.dataset.id!;
+      popupTrigger = () => [...root.querySelectorAll<HTMLButtonElement>('button[data-id]')].find((x) => x.dataset.id === want) ?? null;
       focusSpot(ty, id);
     }),
   );
@@ -372,10 +403,11 @@ function locate(): void {
       placeUserMarker();
       renderNearest();
       if (!map || !mapReady || dataState !== 'ready') return;
+      const bottom = sheetOverlap(); // measured after results render, so it is the real sheet height
       const bounds = new maplibregl.LngLatBounds(here, here);
       for (const it of nearestItems(here)) if (it.best) bounds.extend(it.best.geometry.coordinates);
       map.fitBounds(bounds, {
-        padding: { top: 70, left: 50, right: 50, bottom: isMobile() ? Math.round(window.innerHeight * 0.45) : 70 },
+        padding: { top: 70, left: 50, right: 50, bottom: 70 + bottom },
         maxZoom: 16,
       });
     },
@@ -409,7 +441,7 @@ function renderList(): void {
     .sort((a, z) => a.d - z.d)
     .slice(0, 25);
   el.innerHTML = rows.length
-    ? `<p class="note">${t('listNote')}</p><ul class="spots">` +
+    ? `<p class="note">${t(b ? 'listNote' : 'listNoteNoMap')}</p><ul class="spots">` +
       rows
         .map(
           ({ ty, f, d }) =>
@@ -422,18 +454,46 @@ function renderList(): void {
 }
 
 // ---- bottom sheet (mobile) ---------------------------------------------------
+let sheetFocusTimer = 0;
+/** While the modal sheet is open, keep Tab (and screen readers) inside it. */
+function setBackgroundInert(on: boolean): void {
+  if (on && !isMobile()) return; // never inert on desktop
+  for (const id of ['topbar', 'stage', 'footer']) document.getElementById(id)?.toggleAttribute('inert', on);
+}
 function openSheet(showMore: boolean): void {
   const panel = $('panel');
+  const wasOpen = panel.classList.contains('open');
   panel.classList.add('open');
   panel.classList.toggle('show-more', showMore);
   $('chip').setAttribute('aria-expanded', 'true');
   if (!isMobile()) return;
   panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-modal', 'true');
   panel.setAttribute('aria-label', t('chip'));
-  $('sheet-close').focus({ preventScroll: true });
-  // Keep the selected spot visible above the sheet.
+  // Focus only once the sheet is visible; focus() on a visibility:hidden element is a no-op.
+  const focusClose = (): void => {
+    window.clearTimeout(sheetFocusTimer);
+    panel.removeEventListener('transitionend', onEnd);
+    if (panel.classList.contains('open') && isMobile()) {
+      $('sheet-close').focus({ preventScroll: true });
+      setBackgroundInert(true); // only after focus is inside the sheet
+    }
+  };
+  const onEnd = (e: TransitionEvent): void => {
+    if (e.target === panel && e.propertyName === 'transform') focusClose();
+  };
+  if (wasOpen || window.matchMedia('(prefers-reduced-motion: reduce)').matches) focusClose();
+  else {
+    panel.addEventListener('transitionend', onEnd);
+    sheetFocusTimer = window.setTimeout(focusClose, 400); // fallback if transitionend never fires
+  }
+  // The sheet's nearest rows already give name, caveat and Directions, so drop the popup
+  // (it would sit inside the inert map) and keep the selected spot centred in the visible strip.
   if (map && mapReady && selected) {
-    map.easeTo({ center: selected, padding: { top: 0, left: 0, right: 0, bottom: Math.round(window.innerHeight * 0.62) }, duration: 250 });
+    const spot = selected;
+    closePopup();
+    const overlap = sheetOverlap();
+    map.easeTo({ center: spot, padding: { top: 0, left: 0, right: 0, bottom: overlap }, offset: [0, 0], duration: 250 });
   }
 }
 function closeSheet(): void {
@@ -441,6 +501,9 @@ function closeSheet(): void {
   const wasOpen = panel.classList.contains('open');
   panel.classList.remove('open', 'show-more');
   panel.removeAttribute('role');
+  panel.removeAttribute('aria-modal');
+  setBackgroundInert(false);
+  window.clearTimeout(sheetFocusTimer);
   panel.removeAttribute('aria-label');
   $('chip').setAttribute('aria-expanded', 'false');
   if (!wasOpen) return;
@@ -591,7 +654,7 @@ function initMap(): void {
     for (const ty of TYPES) {
       const vis = visible[ty] ? 'visible' : 'none';
       const bump = ty === 'water' ? 4 : 0; // water is the product; make its clusters larger
-      const radius = ['step', ['get', 'point_count'], RADII[0] + bump, 10, RADII[1] + bump, 50, RADII[2] + bump, 200, RADII[3] + bump];
+      const radius = ['step', PC, RADII[0] + bump, 10, RADII[1] + bump, 50, RADII[2] + bump, 200, RADII[3] + bump];
       const off = (r: number) => ['literal', [Math.round((r + bump) * 0.72), -Math.round((r + bump) * 0.72)]];
       m.addSource(ty, {
         type: 'geojson',
@@ -632,7 +695,7 @@ function initMap(): void {
           'icon-size': 0.7,
           'icon-allow-overlap': true,
           'icon-ignore-placement': true,
-          'icon-offset': ['step', ['get', 'point_count'], off(RADII[0]), 10, off(RADII[1]), 50, off(RADII[2]), 200, off(RADII[3])] as never,
+          'icon-offset': ['step', PC, off(RADII[0]), 10, off(RADII[1]), 50, off(RADII[2]), 200, off(RADII[3])] as never,
           visibility: vis,
         },
       });
@@ -652,12 +715,17 @@ function initMap(): void {
         const zoom = await (m.getSource(hit.f.source) as GeoJSONSource).getClusterExpansionZoom(hit.f.properties.cluster_id);
         m.easeTo({ center: coords, zoom: zoom + 0.5 });
       } else {
+        popupTrigger = () => m.getCanvas();
         openPopup({ properties: hit.f.properties as unknown as Props, coords });
       }
     });
     m.on('mousemove', (e) => {
       m.getCanvas().style.cursor = pickAt(e.point) ? 'pointer' : '';
     });
+    // Attribution stays one tap away (and in the footer) but starts collapsed.
+    const attrib = m.getContainer().querySelector('.maplibregl-ctrl-attrib');
+    attrib?.removeAttribute('open');
+    attrib?.classList.remove('maplibregl-compact-show');
     mapReady = true;
     $('mapmsg').hidden = true;
     placeUserMarker();
@@ -672,14 +740,23 @@ $('locate-btn').addEventListener('click', locate);
 $('fab').addEventListener('click', locate);
 $('chip').addEventListener('click', () => (document.getElementById('panel')!.classList.contains('open') ? closeSheet() : openSheet(true)));
 $('sheet-close').addEventListener('click', closeSheet);
+window.matchMedia('(max-width: 760px)').addEventListener('change', (e) => {
+  if (!e.matches) closeSheet();
+});
 $('list-btn').addEventListener('click', () => {
   listOpen = !listOpen;
   renderList();
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
+    const hadPopup = !!popup;
+    const trigger = popupTrigger;
     closePopup();
     closeSheet();
+    clearDetail();
+    if (hadPopup && !isMobile() && (!document.activeElement || document.activeElement === document.body)) {
+      (trigger?.() ?? map?.getCanvas())?.focus({ preventScroll: true });
+    }
   }
 });
 $('lang').addEventListener('click', () => {
